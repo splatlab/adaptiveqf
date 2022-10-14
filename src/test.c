@@ -281,7 +281,7 @@ int main(int argc, char **argv)
 		printf("warning: filling the filter may take longer than necessary because of low universe size\n");
 	}
 
-	FILE *shalla = fopen("data/shalla.txt", "r");
+	//FILE *shalla = fopen("data/shalla.txt", "r");
 	char buffer[1024];
 	FILE *caida = fopen("data/20140619-140100.csv", "r");
 	fgets(buffer, sizeof(buffer), caida);
@@ -313,7 +313,7 @@ int main(int argc, char **argv)
 		//uint64_t* values = malloc(sizeof(uint64_t) * num_inserts);
 		uint64_t *ret_index = malloc(sizeof(uint64_t));
 		uint64_t *ret_hash = malloc(sizeof(uint64_t));
-		uint64_t *ret_other_hash = malloc(sizeof(uint64_t));
+		//uint64_t *ret_other_hash = malloc(sizeof(uint64_t));
 		int *ret_hash_len = malloc(sizeof(int));
 		
 		/*printf("insert returned %lu\n", qf_insert(&qf, 1, 0, 1, QF_NO_LOCK | QF_KEY_IS_HASH));
@@ -539,7 +539,6 @@ int main(int argc, char **argv)
 
       //if (j == 582125609) bp2();
 			if (qf_query(&qf, j, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH)) {
-				if (*ret_index / 64 == 489) frame(&qf, *ret_index / 64, *ret_index % 64, i);
 				count_p++;
 				ii.rem = *ret_hash;
 				ii.len = *ret_hash_len;
