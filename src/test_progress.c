@@ -188,9 +188,9 @@ int main(int argc, char **argv)
 
 	clear_log();
 	char buffer[256];
-	FILE *shalla = fopen("data/shalla.txt", "r");
-	FILE *caida = fopen("data/20140619-140100.csv", "r");
-	fgets(buffer, sizeof(buffer), caida);
+	//FILE *shalla = fopen("data/shalla.txt", "r");
+	//FILE *caida = fopen("data/20140619-140100.csv", "r");
+	//fgets(buffer, sizeof(buffer), caida);
 	
 	FILE *outfp = fopen("fprate-vs-queries.csv", "w");
 	sprintf(buffer, "queries,false positive rate\n");
@@ -202,9 +202,9 @@ int main(int argc, char **argv)
 	for (int q = 0; q < query_set_size; q++) {
 		/*fgets(buffer, sizeof(buffer), shalla);
 		query_set[q] = hash_str(buffer);*/
-		fgets(buffer, sizeof(buffer), caida);
-		csv_get_col(buffer, 3);
-		query_set[q] = hash_str(buffer);
+		//fgets(buffer, sizeof(buffer), caida);
+		//csv_get_col(buffer, 3);
+		//query_set[q] = hash_str(buffer);
 	}
 
 	double *fp_rate_set = calloc(num_queries / step_size, sizeof(double));
@@ -239,10 +239,10 @@ int main(int argc, char **argv)
 		printf("starting inserts...\n");
 		uint64_t i, j, k = 0;
 		for (i = 0; i < num_inserts; i++) {
-			//j = rand_uniform(universe);
-			fgets(buffer, sizeof(buffer), caida);
-			csv_get_col(buffer, 3);
-			j = hash_str(buffer);
+			j = rand_uniform(INT_MAX);
+			//fgets(buffer, sizeof(buffer), caida);
+			//csv_get_col(buffer, 3);
+			//j = hash_str(buffer);
 
 			int ret = qf_insert_ret(&qf, j, 1, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH); // attempt to insert
 			if (ret == QF_NO_SPACE) {
@@ -309,9 +309,9 @@ int main(int argc, char **argv)
 		double fpr;
 		count_fp = 0;
 		for (i = 0; i < num_queries; i++) {
-			//j = rand_uniform(universe);
+			j = rand_uniform(INT_MAX);
 			//j = rand_zipfian(1.5, 1lu << 30);
-			j = query_set[rand() % query_set_size];
+			//j = query_set[rand() % query_set_size];
 
 			if (qf_query(&qf, j, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH)) {
 				ii.rem = ret_hash;
@@ -366,8 +366,8 @@ int main(int argc, char **argv)
 		sprintf(buffer, "%lu,%f\n", q * step_size, fp_rate_set[q]);
 		fputs(buffer, outfp);
 	}
-	fclose(shalla);
-	fclose(caida);
+	//fclose(shalla);
+	//fclose(caida);
 	fclose(outfp);
 
 	printf("\nperformed %d trials\n", num_trials);

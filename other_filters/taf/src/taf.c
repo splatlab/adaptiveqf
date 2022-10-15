@@ -958,36 +958,57 @@ void csv_get(char* buffer, int col) {
         buffer[j] = '\0';
 }
 
+double avg_insert_time = 0;
+double avg_query_time = 0;
+double avg_fp_rate = 0;
+
 /// General integration test: insert and query elts, ensuring that there
 /// are no false negatives
 void test_insert_and_query() {
   printf("Testing %s...", __FUNCTION__);
   size_t a = 1 << 20;
   double a_s = 100.0; // a/s
-  double load = 0.95;
+  double load = 0.9;
   size_t s = nearest_pow_of_2((size_t)((double)a / a_s));
   s = (size_t)((double)s * load);
-  TAF* filter = new_taf(s);
+  TAF* filter = new_taf(1 << 20);
+  s = (1 << 20) * load;
 
   // Generate query set
   srandom(time(NULL));
   int nset = (int)(1.5*(double)s);
   Setnode* set = calloc(nset, sizeof(set[0]));
+
+  clock_t start_time = clock();
   char str[64];
   for (int i=0; i<s; i++) {
-    elt_t elt = random() % a;
+    elt_t elt = random();
     sprintf(str, "%lu", elt);
     set_insert(str, (int)strlen(str), 0, set, nset);
     taf_insert(filter, elt);
-    assert(set_lookup(str, (int)strlen(str), set, nset));
-    assert(taf_lookup(filter, elt));
+    //assert(set_lookup(str, (int)strlen(str), set, nset));
+    //assert(taf_lookup(filter, elt));
   }
+  clock_t end_time = clock();
+  avg_insert_time += (double)(end_time - start_time) / s;
+
+  int num_queries = 1000000;
   // Query [0, a] and ensure that all items in the set return true
   int fps = 0;
   int fns = 0;
-  for (int i=0; i<1000000; i++) {
-    elt_t elt = i;
-    elt = rand_zipfian(1.5f, 1lu << 30);
+
+  elt_t *query_set = calloc(num_queries, sizeof(elt_t));
+  for (int i = 0; i < num_queries; i++) {
+	  query_set[i] = rand_zipfian(1.5f, 1lu << 30);
+  }
+
+  start_time = clock();
+  for (int i=0; i<num_queries; i++) {
+	  elt_t elt;
+    //elt = i;
+    //elt = rand_zipfian(1.5f, 1lu << 30);
+    //elt = random();
+    elt = query_set[i];
     sprintf(str, "%lu", elt);
     int in_set = set_lookup(str, (int)strlen(str), set, nset);
     int in_taf = taf_lookup(filter, elt);
@@ -1022,15 +1043,20 @@ void test_insert_and_query() {
         exit(1);
       }
     } else if (!in_set && in_taf) {
-      fps += in_taf;
+      //fps += in_taf;
+      fps++;
     }
-    if (i % 100 == 0) {
+    /*if (i % 100 == 0) {
 	    printf("%d,%f\n", i, (double)fps / i);
-    }
+    }*/
   }
+  end_time = clock();
+  avg_query_time += (double)(end_time - start_time) / num_queries;
+  avg_fp_rate += (double)(fps) / num_queries;
+
   printf("passed. ");
   printf("FPs: %d (%f%%), FNs: %d (%f%%)\n",
-         fps, (double)fps/(double)a * 100, fns, (double)fns/(double)a * 100);
+         fps, (double)fps/(double)num_queries, fns, (double)fns/(double)a * 100);
   print_taf_metadata(filter);
   taf_destroy(filter);
 }
@@ -1129,6 +1155,9 @@ void test_insert_and_query_w_repeats(elt_t *query_set, int query_set_size, int n
         exit(1);
       }
     }
+    if (i % 100 == 0) {
+	    fprates[i / 100] += (double)fps / i;
+    }
   }
   printf("Test results:\n");
   printf("FPs: %d (%f%%), RFPs: %d (%f%%)\n",
@@ -1144,14 +1173,15 @@ void test_dataset_evolution(char* input_file_name, char* output_file_name, int n
 	fclose(outfp);
 	outfp = fopen(output_file_name, "a");
 	char buffer[1024];
-	FILE* infp = fopen(input_file_name, "r");
-	fgets(buffer, sizeof(buffer), infp);
+	//FILE* infp = fopen(input_file_name, "r");
+	//fgets(buffer, sizeof(buffer), infp);
 
 	elt_t *query_set = calloc(query_space_size, sizeof(elt_t));
 	for (int i = 0; i < query_space_size; i++) {
-		fgets(buffer, sizeof(buffer), infp);
+		/*fgets(buffer, sizeof(buffer), infp);
 		csv_get(buffer, 3);
-		query_set[i] = hash_str(buffer);
+		query_set[i] = hash_str(buffer);*/
+		query_set[i] = rand();
 	}
 
 	double *fprates = calloc(num_queries / 100, sizeof(double));
@@ -1161,11 +1191,11 @@ void test_dataset_evolution(char* input_file_name, char* output_file_name, int n
 	}
 
 	for (int i = 0; i < num_queries / step_size; i++) {
-		sprintf(buffer, "%d,%f\n", i * step_size, fprates[i]);
+		sprintf(buffer, "%d,%f\n", i * step_size, fprates[i] / num_trials);
 		fputs(buffer, outfp);
 	}
 	
-	fclose(infp);
+	//fclose(infp);
 	fclose(outfp);
 	free(query_set);
 	free(fprates);
@@ -1425,7 +1455,13 @@ int main(int argc, char *argv[]) {
   printf("finished with no issues\n");*/
 
   //test_dataset_evolution("../../../aqf/AdaptiveQF/data/shalla.txt", "progress.csv", 10, 1000000, 2000000, 100);
-  //test_dataset_evolution("../../../aqf/AdaptiveQF/data/20140619-140100.csv", "progress.csv", 10, 1000000, 1000000, 100);
-  test_insert_and_query();
+  test_dataset_evolution("../../../aqf/AdaptiveQF/data/20140619-140100.csv", "progress.csv", 10, 1000000, 1000000, 100);
+  /*int num_trials = 1;
+  for (int i = 0; i < num_trials; i++) {
+  	test_insert_and_query();
+  }
+  printf("insert time: %f\n", avg_insert_time / num_trials);
+  printf("query time: %f\n", avg_query_time / num_trials);
+  printf("fp rate: %f\n", avg_fp_rate / num_trials);*/
 }
 #endif // TEST_TAF

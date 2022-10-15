@@ -22,7 +22,7 @@ int fbhs=12;
 int skewed=0;
 
 int max_loop=1;    //num of trials
-int load_factor=95;    //load factor
+int load_factor=90;    //load factor
 int AS=32;
 int A=0;
 //int npf=1000;
@@ -253,10 +253,10 @@ int run()
             */
             //create A set
 	    
-	    FILE *caida = fopen("../../aqf/AdaptiveQF/data/20140619-140100.csv", "r");
-	    FILE *shalla = fopen("../../aqf/AdaptiveQF/data/shalla.txt", "r");
+	    //FILE *caida = fopen("../../aqf/AdaptiveQF/data/20140619-140100.csv", "r");
+	    //FILE *shalla = fopen("../../aqf/AdaptiveQF/data/shalla.txt", "r");
 	    
-	    fgets(buffer, sizeof(buffer), caida);
+	    //fgets(buffer, sizeof(buffer), caida);
             for (int64_t i = 0;  i <1000000; i++) {
                 /*unsigned int key = (unsigned int) dis(gen);
                 if ((A_map.count(key) > 0) || (S_map.count(key) > 0)) 
@@ -279,11 +279,12 @@ int run()
 		    //csv_get(buffer, 3);
 		    //fgets(buffer, sizeof(buffer), shalla);
 		    //A_ar.push_back(hash_str(buffer));
+		    //A_ar.push_back(rand_zipfian(1.5f, 1lu << 30));
 		    A_ar.push_back(rand());
             }
 	    if(!quiet) fprintf(stderr, "\n");
-	    fclose(caida);
-	    fclose(shalla);
+	    //fclose(caida);
+	    //fclose(shalla);
 
             //scramble  the A array
             //printf("A set of %lu elements created \n",A_ar.size());
@@ -338,8 +339,8 @@ int run()
                     num_swap++;
                 }
 		if (iter % 100 == 0) {
-			/*sprintf(buffer, "%ld,%f\n", iter, (double)tot_FF_FP / iter);
-			fputs(buffer, progress);*/
+			//sprintf(buffer, "%ld,%f\n", iter, (double)tot_FF_FP / iter);
+			//fputs(buffer, progress);
 			double fpr = sample_FF_FP;
 			fpr = (iter == 0 ? 0 : fpr / iter);
 			fpr += fprates[iter / 100] * trials;
@@ -349,6 +350,7 @@ int run()
 		}
             }
 	    clock_t end_queries = clock();
+	    printf("QUERY TIME PER: %f\n", (double)(end_queries - start_queries) / 1000000);
 	    avg_query_time += end_queries - start_queries;
 	    avg_fp += sample_FF_FP;
             // consistency check after moving items!!!

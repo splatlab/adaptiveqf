@@ -109,13 +109,6 @@ double rand_zipfian(double s, double max) {
 	}
 }
 
-struct _keyValuePair {
-	uint64_t key;
-	uint64_t val;
-	struct _keyValuePair *left;
-	struct _keyValuePair *right;
-} typedef keyValuePair;
-
 #define HASH_TABLE_SIZE  88000000
 
 struct _ilist {
@@ -139,13 +132,6 @@ SGLIB_DEFINE_LIST_FUNCTIONS(ilist, ILIST_COMPARATOR, next)
 SGLIB_DEFINE_HASHED_CONTAINER_PROTOTYPES(ilist, HASH_TABLE_SIZE, ilist_hash_function)
 SGLIB_DEFINE_HASHED_CONTAINER_FUNCTIONS(ilist, HASH_TABLE_SIZE, ilist_hash_function)
 
-int find(uint64_t* array, int len, uint64_t item) {
-	uint64_t i;
-	for (i = 0; i < len; i++)
-		if (array[i] == item) return 1;
-	return 0;
-}
-
 uint64_t hash_str(char *str) {
 	uint64_t hash = 5381;
 	int c;
@@ -166,84 +152,6 @@ void csv_get(char* buffer, int col) {
 	buffer[j] = '\0';
 }
 
-// returns the number of low order bits on which hash1 and hash2 match
-int hashCmp(uint64_t hash1, uint64_t hash2) {
-	//printf("hashCmp: %lu, %lu\n", hash1, hash2);
-	int i;
-	for (i = 0; i < 64; i++) {
-		if ((hash1 & 1) != (hash2 & 1)) break;
-		hash1 >>= 1;
-		hash2 >>= 1;
-	}
-	return i;
-}
-
-keyValuePair *getItem(keyValuePair *root, uint64_t hash) {
-	if (root == NULL) return root;
-	//printf("getItem: %lu, %lu\n", root->key, hash);
-	int cmp = hashCmp(root->key, hash);
-	if (cmp == 64) return root;
-	keyValuePair *ret = NULL;
-	if (((hash >> cmp) & 1) > ((root->key >> cmp) & 1)) {
-		if (root->right != NULL) ret = getItem(root->right, hash);
-		else return root;
-	}
-	else {
-		if (root->left != NULL) ret = getItem(root->left, hash);
-		else return root;
-	}
-	//printf("%lu, %lu\n", ret->key, hash);
-	if (hashCmp(ret->key, hash) > cmp) return ret;
-	else return root;
-}
-
-keyValuePair *insertItem(keyValuePair* root, keyValuePair *item) {
-	if (root == NULL || item == NULL) return item;
-	//printf("insItem: %lu, %lu\n", root->key, item->key);
-	int cmp = hashCmp(root->key, item->key);
-	if (cmp / 128 > 0) {
-		if (root->right == NULL) root->right = item;
-		else insertItem(root->right, item);
-	}
-	else {
-		if (root->left == NULL) root->left = item;
-		else insertItem(root->left, item);
-	}
-	return root;
-}
-
-int matchpart(uint64_t item, uint64_t hash, uint64_t hash_len, uint64_t qbits, uint64_t rbits) {
-	if ((item & ((2 << rbits) - 1)) != (hash & ((2 << rbits) - 1))) return 0;
-	hash_len -= rbits;
-	hash >>= rbits;
-	item >>= qbits + rbits;
-	while (hash_len > 0) {
-		if ((item & ((2 << rbits) - 1)) != (hash & ((2 << rbits) - 1))) return 0;
-		hash_len -= rbits;
-		hash >>= rbits;
-		item >>= rbits;
-	}
-	return 1;
-}
-
-int findpart(uint64_t* array, int len, uint64_t hash, uint64_t hash_len, uint64_t qbits, uint64_t rbits) {
-	int i;
-	for (i = 0; i < len; i++)
-		if (matchpart(array[i], hash, hash_len, qbits, rbits)) return 1;
-	return -1;
-}
-
-void printbin(uint64_t val) {
-	int i;
-	for (i = 63; i >= 0; i--) {
-		printf("%lu", (val >> i) % 2);
-	}
-	printf("\n");
-}
-
-ilist *find_ilist(uint64_t hash) {
-	return NULL;
-}
 
 int main(int argc, char **argv)
 {
