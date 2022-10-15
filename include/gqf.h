@@ -161,7 +161,7 @@ extern "C" {
 	 *    == QF_DOESNT_EXIST: Specified item did not exist.
 	 *    == QF_COULDNT_LOCK: TRY_ONCE_LOCK has failed to acquire the lock.
 	 */
-	int qf_remove(QF *qf, uint64_t key, uint64_t value, uint64_t count, uint8_t
+	int qf_remove(QF *qf, uint64_t key, uint64_t *ret_hash, int *ret_hash_len, uint8_t
 								flags);
 
 	/* Remove all instances of this key/value pair. */

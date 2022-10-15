@@ -1,4 +1,4 @@
-TARGETS=test test_threadsafe test_pc bm test_progress test_throughput
+TARGETS=test test_threadsafe test_pc bm test_progress test_throughput test_deletions
 
 ifndef D
 	DEBUG=-g
@@ -48,6 +48,10 @@ test_progress:								$(OBJDIR)/test_progress.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_fi
 										$(OBJDIR)/partitioned_counter.o
 
 test_throughput:								$(OBJDIR)/test_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/hashutil.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_deletions:								$(OBJDIR)/test_deletions.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 

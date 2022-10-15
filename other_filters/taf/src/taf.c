@@ -469,6 +469,7 @@ void taf_clear(TAF* filter) {
   filter->remote = calloc(filter->nslots, sizeof(Remote_elt));
 }
 
+int extra_blocks = 0;
 static void raw_insert(TAF* filter, elt_t elt, uint64_t hash) {
   size_t quot = calc_quot(filter, hash);
   rem_t rem = calc_rem(filter, hash, 0);
@@ -499,6 +500,7 @@ static void raw_insert(TAF* filter, elt_t elt, uint64_t hash) {
         // Extend filter by one block and use the first empty index
         add_block(filter);
         u = filter->nslots - 64;
+	extra_blocks++;
       }
       inc_offsets(filter, r+1, u-1);
       shift_rems_and_runends(filter, r + 1, (int)u - 1);
@@ -1427,12 +1429,13 @@ int main(int argc, char *argv[]) {
 //  test_insert_and_query_w_repeats();
   test_mixed_insert_and_query_w_repeats();*/
 
-  /*if (argc < 3) {
+  if (argc < 3) {
     printf("provide number of slots and number of inserts");
     return 0;
   }
 
   TAF* filter = new_taf(atoi(argv[1]));
+  abort();
 
   int num_inserts = atoi(argv[2]), num_queries = 1000000;
   clock_t start_time = clock();
@@ -1452,10 +1455,11 @@ int main(int argc, char *argv[]) {
 
   taf_destroy(filter);
 
-  printf("finished with no issues\n");*/
+  printf("%d\n", extra_blocks);
+  printf("finished with no issues\n");
 
   //test_dataset_evolution("../../../aqf/AdaptiveQF/data/shalla.txt", "progress.csv", 10, 1000000, 2000000, 100);
-  test_dataset_evolution("../../../aqf/AdaptiveQF/data/20140619-140100.csv", "progress.csv", 10, 1000000, 1000000, 100);
+  //test_dataset_evolution("../../../aqf/AdaptiveQF/data/20140619-140100.csv", "progress.csv", 10, 1000000, 1000000, 100);
   /*int num_trials = 1;
   for (int i = 0; i < num_trials; i++) {
   	test_insert_and_query();

@@ -980,67 +980,75 @@ static inline int insert_replace_slots_and_shift_remainders_and_runends_and_offs
 	return 1;
 }
 
-static inline int remove_replace_slots_and_shift_remainders_and_runends_and_offsets(QF *qf, int operation, uint64_t bucket_index,
-        uint64_t overwrite_index, const uint64_t *remainders, uint64_t total_remainders, uint64_t old_length)
+static inline int remove_replace_slots_and_shift_remainders_and_runends_and_offsets(const QF *qf, int only_item_in_run, uint64_t bucket_index,
+        uint64_t overwrite_index, uint64_t old_length)
 {
 	uint64_t i;
 
-	// Update the slots
-	for (i = 0; i < total_remainders; i++)
-		set_slot(qf, overwrite_index + i, remainders[i]);
-
 	// If this is the last thing in its run, then we may need to set a new runend bit
-	if (is_runend(qf, overwrite_index + old_length - 1)) {
-	  if (total_remainders > 0) { 
-	    // If we're not deleting this entry entirely, then it will still the last entry in this run
-	    METADATA_WORD(qf, runends, overwrite_index + total_remainders - 1) |= 1ULL << ((overwrite_index + total_remainders - 1) % 64);
-	  } else if (overwrite_index > bucket_index &&
-		     !is_runend(qf, overwrite_index - 1)) {
+	if (is_runend(qf, overwrite_index)) {
+	  if (!only_item_in_run) {
 	    // If we're deleting this entry entirely, but it is not the first entry in this run,
 	    // then set the preceding entry to be the runend
-	    METADATA_WORD(qf, runends, overwrite_index - 1) |= 1ULL << ((overwrite_index - 1) % 64);
+	    uint64_t temp = overwrite_index - 1;
+	    while (is_counter(qf, temp)) temp--;
+	    while (is_extension(qf, temp)) temp--;
+	    METADATA_WORD(qf, runends, temp) |= 1ULL << (temp % 64);
 	  }
 	}
 
 	// shift slots back one run at a time
 	uint64_t original_bucket = bucket_index;
 	uint64_t current_bucket = bucket_index;
-	uint64_t current_slot = overwrite_index + total_remainders;
-	uint64_t current_distance = old_length - total_remainders;
+	uint64_t current_slot = overwrite_index;
+	uint64_t current_distance = old_length;
 	int ret_current_distance = current_distance;
+	int was_runend = is_runend(qf, overwrite_index);
 
 	while (current_distance > 0) {
-		if (is_runend(qf, current_slot + current_distance - 1)) {
+		// start with an occupied-runend pair
+		current_bucket = bucket_index;
+		current_slot = overwrite_index;
+		
+		while (!was_runend && !is_runend(qf, current_slot)) current_slot++;
+		while (is_extension(qf, current_slot + 1)) current_slot++;
+		while (is_counter(qf, current_slot + 1)) current_slot++;
+		do {
+			current_bucket++;
+		} while (current_bucket <= current_slot && !is_occupied(qf, current_bucket));
+
+		while (current_bucket <= current_slot) { // until we find the end of the cluster,
+			// find the last slot in the run
+			current_slot++;
+			while (!is_runend(qf, current_slot)) current_slot++;
+			while (is_extension(qf, current_slot + 1)) current_slot++;
+			while (is_counter(qf, current_slot + 1)) current_slot++;
+
+			// see if the next occupied bucket is after the end of this run
 			do {
 				current_bucket++;
-			} while (current_bucket < current_slot + current_distance &&
-							 !is_occupied(qf, current_bucket));
+			} while (current_bucket <= current_slot && !is_occupied(qf, current_bucket));
 		}
 
-		if (current_bucket <= current_slot) {
-			set_slot(qf, current_slot, get_slot(qf, current_slot + current_distance));
-			if (is_runend(qf, current_slot) != 
-					is_runend(qf, current_slot + current_distance))
-				METADATA_WORD(qf, runends, current_slot) ^= 1ULL << (current_slot % 64);
-			current_slot++;
-
-		} else if (current_bucket <= current_slot + current_distance) {
-			uint64_t i;
-			for (i = current_slot; i < current_slot + current_distance; i++) {
-				set_slot(qf, i, 0);
-				METADATA_WORD(qf, runends, i) &= ~(1ULL << (i % 64));
-			}
-
-			current_distance = current_slot + current_distance - current_bucket;
-			current_slot = current_bucket;
-		} else {
-			current_distance = 0;
+		// now that we've found the last slot in the cluster, we can shift the whole cluster over by 1
+		int i;
+		for (i = overwrite_index; i < current_slot; i++) {
+			set_slot(qf, i, get_slot(qf, i + 1));
+			if ((is_runend(qf, i) || is_counter(qf, i)) != (is_runend(qf, i + 1) || is_counter(qf, i + 1)))
+				METADATA_WORD(qf, runends, i) ^= 1ULL << (i % 64);
+			if ((is_extension(qf, i) || is_counter(qf, i)) != (is_extension(qf, i + 1) || is_counter(qf, i + 1)))
+				METADATA_WORD(qf, extensions, i) ^= 1ULL << (i % 64);
 		}
+		set_slot(qf, i, 0);
+		METADATA_WORD(qf, runends, i) &= ~(1ULL << (i % 64));
+		METADATA_WORD(qf, extensions, i) &= ~(1ULL << (i % 64));
+		
+		current_distance--;
 	}
 	
 	// reset the occupied bit of the hash bucket index if the hash is the
 	// only item in the run and is removed completely.
-	if (operation && !total_remainders)
+	if (only_item_in_run)
 		METADATA_WORD(qf, occupieds, bucket_index) &= ~(1ULL << (bucket_index % 64));
 
 	// update the offset bits.
@@ -1049,7 +1057,7 @@ static inline int remove_replace_slots_and_shift_remainders_and_runends_and_offs
 	// original_bucket block.
 	// Update the offset of the block to which it belongs.
 	uint64_t original_block = original_bucket / QF_SLOTS_PER_BLOCK;
-	if (old_length > total_remainders) {	// we only update offsets if we shift/delete anything
+	if (old_length > 0) {	// we only update offsets if we shift/delete anything
 		while (1) {
 			uint64_t last_occupieds_hash_index = QF_SLOTS_PER_BLOCK * original_block + (QF_SLOTS_PER_BLOCK - 1);
 			uint64_t runend_index = run_end(qf, last_occupieds_hash_index);
@@ -1068,13 +1076,10 @@ static inline int remove_replace_slots_and_shift_remainders_and_runends_and_offs
 		}
 	}
 
-	int num_slots_freed = old_length - total_remainders;
+	int num_slots_freed = old_length;
 	modify_metadata(&qf->runtimedata->pc_noccupied_slots, -num_slots_freed);
 	/*qf->metadata->noccupied_slots -= (old_length - total_remainders);*/
-	if (!total_remainders) {
-		modify_metadata(&qf->runtimedata->pc_ndistinct_elts, -1);
-		/*qf->metadata->ndistinct_elts--;*/
-	}
+	modify_metadata(&qf->runtimedata->pc_ndistinct_elts, -1);
 
 	return ret_current_distance;
 }
@@ -1662,7 +1667,8 @@ static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_in
 				}
 				else if (is_runend(qf, current_index)) break;
 				else {
-					while (is_extension(qf, ++current_index)) current_index++;
+					current_index++;
+					while (is_extension(qf, current_index)) current_index++;
 					while (is_counter(qf, current_index)) current_index++;
 				}
 			} while (current_index < qf->metadata->xnslots);
@@ -1757,15 +1763,13 @@ int insert_and_extend(QF *qf, uint64_t index, uint64_t key, uint64_t count, uint
 	return extended_len;
 }
 
-inline static int _remove(QF *qf, __uint128_t hash, uint64_t count, uint8_t
-													runtime_lock)
+inline static int _remove(QF *qf, uint64_t hash, uint64_t *ret_hash, int *ret_hash_len,  uint8_t runtime_lock)
 {
 	// hash_remainder is last 7 bits of hash, hash_bucket_index is quotient
 	int ret_numfreedslots = 0;
 	uint64_t hash_remainder           = hash & BITMASK(qf->metadata->bits_per_slot);
 	uint64_t hash_bucket_index        = hash >> qf->metadata->bits_per_slot;
 	uint64_t current_remainder, current_count, current_end;
-	uint64_t new_values[67];
 
 	// Lock mutex
 	if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
@@ -1775,30 +1779,47 @@ inline static int _remove(QF *qf, __uint128_t hash, uint64_t count, uint8_t
 
 	// If slot is empty, don't bother
 	if (!is_occupied(qf, hash_bucket_index))
-		return -1;
+		return 0;
 
 	uint64_t original_runstart_index = hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1;
 	uint64_t current_index = original_runstart_index;
-	int only_item_in_the_run = 0;
+	int only_item_in_run = 0;
 
-	/*Find the counter for this remainder, if one exists.*/
+	uint64_t count_info;
+	int count_slots;
+	// Find a matching item in the filter, if one exists
+	while (is_extension(qf, current_index)) current_index++;
+	while (is_counter(qf, current_index)) current_index++;
 	do {
-		if (!is_extension(qf, current_index) && !is_counter(qf, current_index) && match(qf, current_index, hash)) {
-			uint64_t ext, count;
-			int ext_len, count_len;
-			get_slot_info(qf, current_index, &ext, &ext_len, &count, &count_len);
-			int64_t new_values[67];
-			remove_replace_slots_and_shift_remainders_and_runends_and_offsets(qf, 0, hash_bucket_index, current_index, NULL, 0, ext_len + count_len + 1);
-			break;
+		if (get_slot(qf, current_index) == hash_remainder) {
+			//match(qf, current_index, hash);
+			get_slot_info(qf, current_index, ret_hash, ret_hash_len, &count_info, &count_slots) <= 0;
+
+			if (*ret_hash == ((hash >> qf->metadata->quotient_bits + qf->metadata->bits_per_slot) & BITMASK(*ret_hash_len * qf->metadata->bits_per_slot))) {
+				if (current_index == original_runstart_index && is_runend(qf, current_index)) only_item_in_run = 1;
+				int ret_freed_slots = remove_replace_slots_and_shift_remainders_and_runends_and_offsets(qf, only_item_in_run, hash_bucket_index, current_index, count_slots + *ret_hash_len + 1);
+
+				if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
+					qf_unlock(qf, hash_bucket_index, /*small*/ false);
+				}
+				return 0;
+			}
+
+			if (is_runend(qf, current_index)) break;
+			current_index += count_slots + *ret_hash_len + 1;
 		}
-		current_index = current_index + 1;
-	} while (/*current_remainder < hash_remainder &&*/ !is_runend(qf, current_index));
+		else if (is_runend(qf, current_index)) break;
+		else {
+			while (is_extension(qf, ++current_index)) current_index++;
+			while (is_counter(qf, current_index)) current_index++;
+		}
+	} while (current_index < qf->metadata->xnslots);
 
 	if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
 		qf_unlock(qf, hash_bucket_index, /*small*/ false);
 	}
 
-	return 1;
+	return 0;
 }
 
 /***********************************************************************
@@ -2240,12 +2261,8 @@ int qf_set_count(QF *qf, uint64_t key, uint64_t value, uint64_t count, uint8_t
 	return ret;
 }
 
-int qf_remove(QF *qf, uint64_t key, uint64_t value, uint64_t count, uint8_t
-							flags)
+int qf_remove(QF *qf, uint64_t key, uint64_t *ret_hash, int *ret_hash_len, uint8_t flags)
 {
-	if (count == 0)
-		return true;
-
 	if (GET_KEY_HASH(flags) != QF_KEY_IS_HASH) {
 		if (qf->metadata->hash_mode == QF_HASH_DEFAULT)
 			key = MurmurHash64A(((void *)&key), sizeof(key),
@@ -2253,12 +2270,11 @@ int qf_remove(QF *qf, uint64_t key, uint64_t value, uint64_t count, uint8_t
 		else if (qf->metadata->hash_mode == QF_HASH_INVERTIBLE)
 			key = hash_64(key, BITMASK(qf->metadata->key_bits));
 	}
-	uint64_t hash = (key << qf->metadata->value_bits) | (value &
-																											 BITMASK(qf->metadata->value_bits));
-	return _remove(qf, hash, count, flags);
+	uint64_t hash =	key;
+	return _remove(qf, hash, ret_hash, ret_hash_len, flags);
 }
 
-int qf_delete_key_value(QF *qf, uint64_t key, uint64_t value, uint8_t flags)
+/*int qf_delete_key_value(QF *qf, uint64_t key, uint64_t value, uint8_t flags)
 {
 	uint64_t count = qf_count_key_value(qf, key, value, flags);
 	if (count == 0)
@@ -2274,7 +2290,7 @@ int qf_delete_key_value(QF *qf, uint64_t key, uint64_t value, uint8_t flags)
 	uint64_t hash = (key << qf->metadata->value_bits) | (value &
 																											 BITMASK(qf->metadata->value_bits));
 	return _remove(qf, hash, count, flags);
-}
+}*/
 
 uint64_t qf_count_key_value(const QF *qf, uint64_t key, uint64_t value,
 														uint8_t flags)

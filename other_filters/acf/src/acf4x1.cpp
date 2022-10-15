@@ -522,7 +522,7 @@ int main(int argc, char **argv) {
     /*init(argc,argv);
     return run();*/
 
-    /*if (argc < 3) {
+    if (argc < 3) {
             printf("provide size of filter and num inserts\n");
             return 0;
     }
@@ -533,14 +533,15 @@ int main(int argc, char **argv) {
     clock_t start_time = clock();
     int i;
     for (i = 0; i < num_inserts; i++) {
+	    if (i % 10000 == 0) printf("%d\n", i);
       if (!cuckoo.insert(rand(), 0)) break;
     }
     printf("made %d inserts\n", i);
     printf("insert time: %ld\n", clock() - start_time);
     printf("insert time per: %f\n", (double)(clock() - start_time) / i);
-    return 1;*/
+    return 1;
 
-    num_way = 4;
+    /*num_way = 4;
     num_cells = 1;
     ht_size = 1 << 18;
 
@@ -559,5 +560,5 @@ int main(int argc, char **argv) {
     printf("avg insert time per item: %f\n", avg_insert_time / avg_inserts);
     printf("avg num inserts: %f\n", avg_inserts / num_trials);
     printf("avg query time per item: %f\n", avg_query_time / (num_inserts * num_trials));
-    printf("avg false positive rate: %f\n", avg_fp / (num_inserts * num_trials));
+    printf("avg false positive rate: %f\n", avg_fp / (num_inserts * num_trials));*/
 }
