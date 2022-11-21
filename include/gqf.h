@@ -281,8 +281,8 @@ extern "C" {
 	 *   = 0: Iterator is still valid.
 	 *   = QFI_INVALID: iterator has reached end.
 	 */
-	int qfi_get_hash(const QFi *qfi, uint64_t *hash, uint64_t *value, uint64_t
-									 *count);
+	//int qfi_get_hash(const QFi *qfi, uint64_t *hash, uint64_t *count);
+	int qfi_get_hash(const QFi *qfi, uint64_t *rem, uint64_t *ext, uint64_t *ext_len, uint64_t *count);
 
 	/* Advance to next entry.
 	 * Return value:
@@ -327,6 +327,10 @@ extern "C" {
 	void qf_dump(const QF *);
 	void qf_dump_metadata(const QF *qf);
 
+	void start_recording();
+	void stop_recording();
+	int record(const QF *qf, char *operation, uint64_t hash);
+	int snapshot(const QF *qf);
 
 #ifdef __cplusplus
 }

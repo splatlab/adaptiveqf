@@ -470,6 +470,16 @@ static inline int is_counter(const QF *qf, uint64_t index)
 	//return 0;
 }
 
+static inline int is_runend_or_counter(const QF *qf, uint64_t index)
+{
+	return (METADATA_WORD(qf, runends, index) >> ((index % QF_SLOTS_PER_BLOCK) & 0b111111)) & 1ULL;
+}
+
+static inline int is_extension_or_counter(const QF *qf, uint64_t index)
+{
+	return (METADATA_WORD(qf, extensions, index) >> ((index % QF_SLOTS_PER_BLOCK) & 0b111111)) & 1ULL;
+}
+
 static inline int bp()
 {
 	return 0;
@@ -625,11 +635,10 @@ static inline uint64_t run_end(const QF *qf, uint64_t hash_bucket_index)
 	}
 
 	uint64_t runend_index = QF_SLOTS_PER_BLOCK * runend_block_index + runend_block_offset;
+	while (is_extension_or_counter(qf, runend_index + 1)) runend_index++;
 	if (runend_index < hash_bucket_index)
 		return hash_bucket_index;
 	else {
-		while (is_extension(qf, runend_index + 1)) runend_index++;
-		while (is_counter(qf, runend_index + 1)) runend_index++;
 		return runend_index;
 	}
 }
@@ -662,16 +671,16 @@ static inline int is_empty(const QF *qf, uint64_t slot_index)
 static inline int might_be_empty(const QF *qf, uint64_t slot_index)
 {
 	return !is_occupied(qf, slot_index)
-		&& !is_runend(qf, slot_index)
-    && !is_extension(qf, slot_index)
-    && !is_counter(qf, slot_index);
+		&& !is_runend_or_counter(qf, slot_index)
+		&& !is_extension_or_counter(qf, slot_index);
 }
 
 static inline int probably_is_empty(const QF *qf, uint64_t slot_index)
 {
 	return get_slot(qf, slot_index) == 0
 		&& !is_occupied(qf, slot_index)
-		&& !is_runend(qf, slot_index);
+		&& !is_runend_or_counter(qf, slot_index)
+		&& !is_extension_or_counter(qf, slot_index);
 }
 
 static inline uint64_t find_first_empty_slot(QF *qf, uint64_t from)
@@ -680,8 +689,7 @@ static inline uint64_t find_first_empty_slot(QF *qf, uint64_t from)
 		return 0;
 	}*/
 	do {
-    while (is_extension(qf, from)) from++;
-    while (is_counter(qf, from)) from++;
+		while (is_extension_or_counter(qf, from)) from++;
 		int t = offset_lower_bound(qf, from);
 		//printf("%d\n", t);
 		if (t < 0) {
@@ -695,8 +703,6 @@ static inline uint64_t find_first_empty_slot(QF *qf, uint64_t from)
 		if (t == 0)
 			break;
 		from = from + t;
-    //while (is_extension(qf, from)) from++;
-    //while (is_counter(qf, from)) from++;
 	} while(1);
 	return from;
 }
@@ -980,21 +986,23 @@ static inline int insert_replace_slots_and_shift_remainders_and_runends_and_offs
 	return 1;
 }
 
+// if only_item_in_run is true, then we need to unmark the occupied bit because we've cleared out the last item in that bucket
+// bucket_index is the hash bucket index of the item to remove
+// overwrite_index is the slot index of the item to remove
+// old_length is the number of total slots the item was using (the base slot plus any slots used for extensions or counters)
 static inline int remove_replace_slots_and_shift_remainders_and_runends_and_offsets(const QF *qf, int only_item_in_run, uint64_t bucket_index,
         uint64_t overwrite_index, uint64_t old_length)
 {
-	uint64_t i;
-
 	// If this is the last thing in its run, then we may need to set a new runend bit
-	if (is_runend(qf, overwrite_index)) {
-	  if (!only_item_in_run) {
-	    // If we're deleting this entry entirely, but it is not the first entry in this run,
-	    // then set the preceding entry to be the runend
-	    uint64_t temp = overwrite_index - 1;
-	    while (is_counter(qf, temp)) temp--;
-	    while (is_extension(qf, temp)) temp--;
-	    METADATA_WORD(qf, runends, temp) |= 1ULL << (temp % 64);
-	  }
+	int was_runend = is_runend(qf, overwrite_index);
+	if (was_runend) {
+		if (!only_item_in_run) {
+			// This entry is the runend, but it is not the first entry in this run
+			// So the preceding entry is to be the new runend
+			uint64_t temp = overwrite_index - 1;
+			while (is_extension_or_counter(qf, temp)) temp--;
+			METADATA_WORD(qf, runends, temp) |= 1ULL << (temp % 64);
+		}
 	}
 
 	// shift slots back one run at a time
@@ -1003,40 +1011,38 @@ static inline int remove_replace_slots_and_shift_remainders_and_runends_and_offs
 	uint64_t current_slot = overwrite_index;
 	uint64_t current_distance = old_length;
 	int ret_current_distance = current_distance;
-	int was_runend = is_runend(qf, overwrite_index);
 
-	while (current_distance > 0) {
+	while (current_distance > 0) { // every iteration of this loop deletes one slot from the item and shifts the cluster accordingly
 		// start with an occupied-runend pair
 		current_bucket = bucket_index;
 		current_slot = overwrite_index;
 		
-		while (!was_runend && !is_runend(qf, current_slot)) current_slot++;
-		while (is_extension(qf, current_slot + 1)) current_slot++;
-		while (is_counter(qf, current_slot + 1)) current_slot++;
+		if (!was_runend) while (!is_runend(qf, current_slot)) current_slot++; // step to the end of the run
+		while (is_extension_or_counter(qf, current_slot + 1)) current_slot++;
 		do {
 			current_bucket++;
-		} while (current_bucket <= current_slot && !is_occupied(qf, current_bucket));
+		} while (current_bucket <= current_slot && !is_occupied(qf, current_bucket)); // step to the next occupied bucket
+		// current_slot should now be on the last slot in the run and current_bucket should be on the bucket for the next run
 
 		while (current_bucket <= current_slot) { // until we find the end of the cluster,
 			// find the last slot in the run
-			current_slot++;
-			while (!is_runend(qf, current_slot)) current_slot++;
-			while (is_extension(qf, current_slot + 1)) current_slot++;
-			while (is_counter(qf, current_slot + 1)) current_slot++;
+			current_slot++; // step into the next run
+			while (!is_runend(qf, current_slot)) current_slot++; // find the last slot in this run
+			while (is_extension_or_counter(qf, current_slot + 1)) current_slot++;
 
-			// see if the next occupied bucket is after the end of this run
+			// find the next bucket
 			do {
 				current_bucket++;
 			} while (current_bucket <= current_slot && !is_occupied(qf, current_bucket));
 		}
 
 		// now that we've found the last slot in the cluster, we can shift the whole cluster over by 1
-		int i;
+		uint64_t i;
 		for (i = overwrite_index; i < current_slot; i++) {
 			set_slot(qf, i, get_slot(qf, i + 1));
-			if ((is_runend(qf, i) || is_counter(qf, i)) != (is_runend(qf, i + 1) || is_counter(qf, i + 1)))
+			if (is_runend_or_counter(qf, i) != is_runend_or_counter(qf, i + 1))
 				METADATA_WORD(qf, runends, i) ^= 1ULL << (i % 64);
-			if ((is_extension(qf, i) || is_counter(qf, i)) != (is_extension(qf, i + 1) || is_counter(qf, i + 1)))
+			if (is_extension_or_counter(qf, i) != is_extension_or_counter(qf, i + 1))
 				METADATA_WORD(qf, extensions, i) ^= 1ULL << (i % 64);
 		}
 		set_slot(qf, i, 0);
@@ -1259,11 +1265,9 @@ static inline uint64_t next_slot(QF *qf, uint64_t current) // EDIT: change schem
 	return current;
 }
 
-int match(const QF *qf, int64_t index, uint64_t hash);
-int get_item_info(const QF *qf, uint64_t index, uint64_t *hash, uint64_t *hash_slots_used, uint64_t *count, uint64_t *count_slots_used);
-int get_slot_info(const QF *qf, uint64_t index, uint64_t *ext, int *ext_slots, uint64_t *count, int *count_slots);
+static inline int get_slot_info(const QF *qf, uint64_t index, uint64_t *ext, int *ext_slots, uint64_t *count, int *count_slots);
 //int qf_adapt(QF *qf, uint64_t index, uint64_t hash, uint64_t other_hash, uint8_t flags);
-int adapt(QF *qf, uint64_t index, uint64_t hash_bucket_index, uint64_t hash, uint64_t other_hash, uint64_t *ret_hash);
+static inline int adapt(QF *qf, uint64_t index, uint64_t hash_bucket_index, uint64_t hash, uint64_t other_hash, uint64_t *ret_hash);
 
 static inline int insert1(QF *qf, __uint128_t hash, uint8_t runtime_lock)
 {
@@ -1534,6 +1538,8 @@ static inline int insert_one_slot(QF *qf, uint64_t target_index, uint64_t insert
 	uint64_t i; // increment offset for all blocks that the shift pushed into
 	for (i = target_index / QF_SLOTS_PER_BLOCK + 1; i <= empty_slot_index / QF_SLOTS_PER_BLOCK; i++) {
 		if (get_block(qf, i)->offset < BITMASK(8*sizeof(qf->blocks[0].offset))) {
+			record(qf, "nudge", (value & BITMASK(qf->metadata->bits_per_slot)) | (target_index << qf->metadata->bits_per_slot)
+					| ((value >> qf->metadata->bits_per_slot) << (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)));
 			get_block(qf, i)->offset++;
 		}
 		/*if (get_block(qf, i)->offset > 65) {
@@ -1545,70 +1551,149 @@ static inline int insert_one_slot(QF *qf, uint64_t target_index, uint64_t insert
 	return 1;
 }
 
-int frame(QF *qf, int block, int offset, uint64_t time) {
-	FILE *fp = fopen("data/frames.txt", "a");
-	if (fp == NULL) return 0;
-	char buffer1[128];
-	char buffer2[256];
+FILE *recording = NULL;
+void start_recording() {
+	if (recording) stop_recording();
+	recording = fopen("target/recording.txt", "w");
+	fclose(recording);
+	recording = fopen("target/recording.txt", "a");
+}
+
+void stop_recording() {
+	if (!recording) return;
+	fclose(recording);
+	recording = NULL;
+}
+
+int record(const QF *qf, char *operation, uint64_t hash) {
+	if (!recording) return 0;
+
+	uint64_t orig_hash = hash;
+	uint64_t index = (hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+	uint64_t block = index / QF_SLOTS_PER_BLOCK;
+	uint64_t intra = index % QF_SLOTS_PER_BLOCK;
+	uint64_t remainder = hash & BITMASK(qf->metadata->bits_per_slot);
+
+	if (block != 15816 && block != 15815) return 0;
+
+	char buffer1[128], buffer2[128];
 	bzero(buffer1, 128);
-	bzero(buffer2, 256);
-	int i;
-	sprintf(buffer2, "%ld\t%d\t%d\n", time, block, offset);
-	fputs(buffer2, fp);
+	bzero(buffer2, 128);
+	int i = 0, j, k = 0;
+	for (j = 0; j < qf->metadata->bits_per_slot; j++) {
+		buffer1[i + j + k] = hash & 1 ? '1' : '0';
+		hash >>= 1;
+	}
+	i += j;
+	buffer1[i + k++] = '-';
+	for (j = 0; j < qf->metadata->quotient_bits; j++) {
+		buffer1[i + j + k] = hash & 1 ? '1' : '0';
+		hash >>= 1;
+	}
+	i += j;
+	for (i = j + k; i < 64; i += j) {
+		buffer1[i + k++] = '-';
+		for (j = 0; j < qf->metadata->bits_per_slot; j++) {
+			buffer1[i + j + k] = hash & 1 ? '1' : '0';
+			hash >>= 1;
+		}
+	}
+	for (j = i + k; j >= 0; j--) {
+		buffer2[i + k - j - 1] = buffer1[j];
+	}
+
+	fprintf(recording, "%s\t\thash:%lu\tbin:%s\n", operation, orig_hash, buffer2);
+	fprintf(recording, "\t\tindex:%lu\tblock:%lu\tintrablock:%lu\tremainder:%lu\n", index, block, intra, remainder);
+	fprintf(recording, "\t\tfill:%lu\toffset:%d\tnext_offset:%d\n", qf_get_num_occupied_slots(qf), get_block(qf, block)->offset, get_block(qf, block + 1)->offset);
+
+	bzero(buffer1, 128);
+	bzero(buffer2, 128);
 	uint64_t temp = get_block(qf, block)->occupieds[0];
 	for (i = 0; i < 64; i++) {
-		buffer1[63 - i] = '0' + temp % 2;
+		buffer1[63 - i] = '0' + (temp & 1);
 		temp >>= 1;
 	}
-	sprintf(buffer2, "\t%s\n", buffer1);
-	fputs(buffer2, fp);
+	fprintf(recording, "\t\t%s\n", buffer1);
 	temp = get_block(qf, block)->runends[0];
 	for (i = 0; i < 64; i++) {
-		buffer1[63 - i] = '0' + temp % 2;
+		buffer1[63 - i] = '0' + (temp & 1);
 		temp >>= 1;
 	}
-	sprintf(buffer2, "\t%s\n", buffer1);
-	fputs(buffer2, fp);
+	fprintf(recording, "\t\t%s\n", buffer1);
 	temp = get_block(qf, block)->extensions[0];
 	for (i = 0; i < 64; i++) {
-		buffer1[63 - i] = '0' + temp % 2;
+		buffer1[63 - i] = '0' + (temp & 1);
 		temp >>= 1;
 	}
-	sprintf(buffer2, "\t%s\n\n", buffer1);
-	fputs(buffer2, fp);
-	fclose(fp);
+	fprintf(recording, "\t\t%s\n\n", buffer1);
+
 	return 1;
+}
+
+int snapshot(const QF *qf) {
+        FILE *fp = fopen("target/snapshot.log", "w");
+        if (fp == NULL) return 0;
+        char buffer1[128];
+        char buffer2[256];
+        bzero(buffer1, 128);
+        bzero(buffer2, 256);
+        int i, j;
+        for (i = 0; i * 64 < qf->metadata->xnslots; i++) {
+                uint64_t occupied = get_block(qf, i)->occupieds[0];
+                for (j = 0; j < 64; j++) {
+                        buffer1[63 - j] = '0' + occupied % 2;
+                        occupied >>= 1;
+                }
+                sprintf(buffer2, "%d\t%s\n", i, buffer1);
+                //printf("%s", buffer2);
+                fputs(buffer2, fp);
+                uint64_t runend = get_block(qf, i)->runends[0];
+                for (j = 0; j < 64; j++) {
+                        buffer1[63 - j] = '0' + runend % 2;
+                        runend >>= 1;
+                }
+                sprintf(buffer2, "\t%s\n", buffer1);
+                //printf("%s", buffer2);
+                fputs(buffer2, fp);
+                uint64_t extension = get_block(qf, i)->extensions[0];
+                for (j = 0; j < 64; j++) {
+                        buffer1[63 - j] = '0' + extension % 2;
+                        extension >>= 1;
+                }
+                sprintf(buffer2, "\t%s\n", buffer1);
+                fputs(buffer2, fp);
+        }
+        fclose(fp);
+        return 1;
 }
 
 int tight_inserts = 0;
 static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_index, uint64_t *ret_hash, int *ret_hash_len, uint8_t runtime_lock) // copy of the insert function for modification
 // hash is 64 hashed key bits concatenated with 64 value bits
 {
+	record(qf, "insert", hash);
+
 	/* int ret_distance = 0; */
-	uint64_t hash_remainder           = hash & BITMASK(qf->metadata->bits_per_slot);
+	uint64_t hash_remainder = hash & BITMASK(qf->metadata->bits_per_slot);
 	*ret_hash = hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
 	*ret_hash_len = qf->metadata->quotient_bits + qf->metadata->bits_per_slot;
-	uint64_t hash_bucket_index        = (hash % qf->metadata->range) >> qf->metadata->bits_per_slot;
+	uint64_t hash_bucket_index = (hash % qf->metadata->range) >> qf->metadata->bits_per_slot;
 	uint64_t hash_bucket_block_offset = hash_bucket_index % QF_SLOTS_PER_BLOCK;
 	/*uint64_t hash_bucket_lock_offset  = hash_bucket_index % NUM_SLOTS_TO_LOCK;*/
 	
 	//printf("remainder = %lu   \t index = %lu\n", hash_remainder, hash_bucket_index);
+	
+	if (qf_get_num_occupied_slots(qf) == 621263) {
+		printf("here\n");
+	}
 
 	if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
 		if (!qf_lock(qf, hash_bucket_index, /*small*/ false, runtime_lock))
 			return QF_COULDNT_LOCK;
 	}
 
-	uint64_t runend_index             = run_end(qf, hash_bucket_index);
+	uint64_t runend_index = run_end(qf, hash_bucket_index);
 	
-	/*if (hash_bucket_index / 64 >= 190655 && hash_bucket_index / 64 <= 190684) tight_inserts++;
-	if (hash == 2247620722264393452) {
-		bp1(qf, hash_bucket_index, hash_bucket_block_offset, hash_remainder);
-	}
-	if (hash_bucket_index / 64 == 948 || hash_bucket_index / 64 == 954) {
-		if (qf_get_num_occupied_slots(qf) >= 7780520) bp1(qf, hash_bucket_index, hash_bucket_block_offset, hash_remainder);
-		frame(qf, hash_bucket_index / 64, hash_bucket_block_offset, qf_get_num_occupied_slots(qf));
-	}*/
 	if (might_be_empty(qf, hash_bucket_index) && runend_index == hash_bucket_index) { /* Empty slot */
 		// If slot is empty, insert new element and then call the function again to increment the counter
 		set_slot(qf, hash_bucket_index, hash_remainder);
@@ -1625,7 +1710,6 @@ static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_in
 	} else { /* Non-empty slot */
 		int64_t runstart_index = hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1;
 
-		int ret;
 		if (!is_occupied(qf, hash_bucket_index)) { /* Empty bucket, but its slot is taken. */
 			insert_one_slot(qf, hash_bucket_index, runstart_index, hash_remainder);
 			
@@ -1640,18 +1724,24 @@ static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_in
 
 			/* uint64_t current_remainder, current_count, current_end; */
 			uint64_t current_index = runstart_index;
+			uint64_t current_remainder;
 
 			uint64_t count_info;
 			int count_slots;
 			// Find a matching item in the filter, if one exists
-			while (is_extension(qf, current_index)) current_index++;
-			while (is_counter(qf, current_index)) current_index++;
+			//while (is_extension_or_counter(qf, current_index)) current_index++;
+			if (is_extension_or_counter(qf, current_index)) {
+				printf("here\n");
+			}
+			assert(!is_extension_or_counter(qf, current_index));
 			do {
-				if (get_slot(qf, current_index) == hash_remainder) {
+				current_remainder = get_slot(qf, current_index);
+				if (current_remainder > hash_remainder) break;
+				else if (current_remainder == hash_remainder) {
 					//match(qf, current_index, hash);
-					get_slot_info(qf, current_index, ret_hash, ret_hash_len, &count_info, &count_slots) <= 0;
+					get_slot_info(qf, current_index, ret_hash, ret_hash_len, &count_info, &count_slots);
 
-					if (*ret_hash == ((hash >> qf->metadata->quotient_bits + qf->metadata->bits_per_slot) & BITMASK(*ret_hash_len * qf->metadata->bits_per_slot))) {
+					if (*ret_hash == ((hash >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) & BITMASK(*ret_hash_len * qf->metadata->bits_per_slot))) {
 						*ret_index = current_index;
 						*ret_hash = (*ret_hash << (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) | (hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot));
 						*ret_hash_len = (*ret_hash_len * qf->metadata->bits_per_slot) + qf->metadata->quotient_bits + qf->metadata->bits_per_slot;
@@ -1665,15 +1755,30 @@ static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_in
 					if (is_runend(qf, current_index)) break;
 					current_index += count_slots + *ret_hash_len + 1;
 				}
-				else if (is_runend(qf, current_index)) break;
+				else if (is_runend(qf, current_index)) {
+					uint64_t insert_index = current_index + 1;
+					while (is_extension_or_counter(qf, insert_index)) insert_index++;
+
+					insert_one_slot(qf, hash_bucket_index, insert_index, hash_remainder);
+					
+					METADATA_WORD(qf, runends, current_index) ^= (1ULL << (current_index % QF_SLOTS_PER_BLOCK));
+					METADATA_WORD(qf, runends, insert_index) |= (1ULL << (insert_index % QF_SLOTS_PER_BLOCK));
+
+					modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+					modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
+					modify_metadata(&qf->runtimedata->pc_nelts, count);
+
+					if (count > 1) *ret_hash_len = insert_and_extend(qf, current_index, hash, count - 1, hash, ret_hash, ret_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
+
+					return 1;
+				}
 				else {
 					current_index++;
-					while (is_extension(qf, current_index)) current_index++;
-					while (is_counter(qf, current_index)) current_index++;
+					while (is_extension_or_counter(qf, current_index)) current_index++;
 				}
 			} while (current_index < qf->metadata->xnslots);
 
-			insert_one_slot(qf, hash_bucket_index, runstart_index, hash_remainder);
+			insert_one_slot(qf, hash_bucket_index, current_index, hash_remainder);
 			
 			//make_space(qf, runstart_index, 1);
 			//set_slot(qf, runstart_index, hash & BITMASK(qf->metadata->bits_per_slot));
@@ -1681,7 +1786,7 @@ static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_in
 			modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
 			modify_metadata(&qf->runtimedata->pc_nelts, count);
 
-			if (count > 1) insert_and_extend(qf, hash_bucket_index, hash, count - 1, hash, ret_hash, ret_hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
+			if (count > 1) *ret_hash_len = insert_and_extend(qf, current_index, hash, count - 1, hash, ret_hash, ret_hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
 		}
 	}
 
@@ -1731,19 +1836,16 @@ int insert_and_extend(QF *qf, uint64_t index, uint64_t key, uint64_t count, uint
 			new_count >>= qf->metadata->bits_per_slot;
 		}
 		for (; new_count > 0; i++) {
-			insert_one_slot(qf, (hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits), index + 1 + ext + i, new_count & BITMASK(qf->metadata->bits_per_slot));
-			METADATA_WORD(qf, extensions, index + 1 + ext + i) |= 1ULL << ((index + 1 + ext + i) % QF_SLOTS_PER_BLOCK);
-			METADATA_WORD(qf, runends, index + 1 + ext + i) |= 1ULL << ((index + 1 + ext + i) % QF_SLOTS_PER_BLOCK);
+			insert_one_slot(qf, (hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits), index + 1 + ext_len + i, new_count & BITMASK(qf->metadata->bits_per_slot));
+			METADATA_WORD(qf, extensions, index + 1 + ext_len + i) |= 1ULL << ((index + 1 + ext_len + i) % QF_SLOTS_PER_BLOCK);
+			METADATA_WORD(qf, runends, index + 1 + ext_len + i) |= 1ULL << ((index + 1 + ext_len + i) % QF_SLOTS_PER_BLOCK);
 			new_count >>= qf->metadata->bits_per_slot;
 		}
 		modify_metadata(&qf->runtimedata->pc_nelts, count);
 	}
 	else { // different items, insert second item and extend both
 
-		/*if (qf_get_num_occupied_slots(qf) == 6636) {
-
-		  }*/
-		uint64_t before = qf_get_num_occupied_slots(qf);
+		//uint64_t before = qf_get_num_occupied_slots(qf);
 		uint64_t hash_bucket_index = (hash % qf->metadata->range) >> qf->metadata->bits_per_slot;
 
 		extended_len = adapt(qf, index, hash_bucket_index, other_hash, hash, ret_other_hash);
@@ -1765,11 +1867,13 @@ int insert_and_extend(QF *qf, uint64_t index, uint64_t key, uint64_t count, uint
 
 inline static int _remove(QF *qf, uint64_t hash, uint64_t *ret_hash, int *ret_hash_len,  uint8_t runtime_lock)
 {
+	record(qf, "remove", hash);
+
 	// hash_remainder is last 7 bits of hash, hash_bucket_index is quotient
 	int ret_numfreedslots = 0;
 	uint64_t hash_remainder           = hash & BITMASK(qf->metadata->bits_per_slot);
-	uint64_t hash_bucket_index        = hash >> qf->metadata->bits_per_slot;
-	uint64_t current_remainder, current_count, current_end;
+	uint64_t hash_bucket_index        = (hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+	//uint64_t current_remainder, current_count, current_end;
 
 	// Lock mutex
 	if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
@@ -1788,21 +1892,20 @@ inline static int _remove(QF *qf, uint64_t hash, uint64_t *ret_hash, int *ret_ha
 	uint64_t count_info;
 	int count_slots;
 	// Find a matching item in the filter, if one exists
-	while (is_extension(qf, current_index)) current_index++;
-	while (is_counter(qf, current_index)) current_index++;
+	while (is_extension_or_counter(qf, current_index)) current_index++;
 	do {
 		if (get_slot(qf, current_index) == hash_remainder) {
 			//match(qf, current_index, hash);
-			get_slot_info(qf, current_index, ret_hash, ret_hash_len, &count_info, &count_slots) <= 0;
+			get_slot_info(qf, current_index, ret_hash, ret_hash_len, &count_info, &count_slots);
 
-			if (*ret_hash == ((hash >> qf->metadata->quotient_bits + qf->metadata->bits_per_slot) & BITMASK(*ret_hash_len * qf->metadata->bits_per_slot))) {
+			if (*ret_hash == ((hash >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) & BITMASK(*ret_hash_len * qf->metadata->bits_per_slot))) {
 				if (current_index == original_runstart_index && is_runend(qf, current_index)) only_item_in_run = 1;
 				int ret_freed_slots = remove_replace_slots_and_shift_remainders_and_runends_and_offsets(qf, only_item_in_run, hash_bucket_index, current_index, count_slots + *ret_hash_len + 1);
 
 				if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
 					qf_unlock(qf, hash_bucket_index, /*small*/ false);
 				}
-				return 0;
+				return ret_freed_slots;
 			}
 
 			if (is_runend(qf, current_index)) break;
@@ -1810,8 +1913,7 @@ inline static int _remove(QF *qf, uint64_t hash, uint64_t *ret_hash, int *ret_ha
 		}
 		else if (is_runend(qf, current_index)) break;
 		else {
-			while (is_extension(qf, ++current_index)) current_index++;
-			while (is_counter(qf, current_index)) current_index++;
+			while (is_extension_or_counter(qf, ++current_index)) current_index++;
 		}
 	} while (current_index < qf->metadata->xnslots);
 
@@ -1874,11 +1976,11 @@ uint64_t qf_init(QF *qf, uint64_t nslots, uint64_t key_bits, uint64_t value_bits
 	qf->metadata->value_bits = value_bits;
 	qf->metadata->key_remainder_bits = key_remainder_bits;
 	qf->metadata->bits_per_slot = bits_per_slot;
-  qf->metadata->quotient_bits = 0;
-  while (qbits > 1) {
-    qbits >>= 1;
-    qf->metadata->quotient_bits++;
-  }
+	qf->metadata->quotient_bits = 0;
+	while (qbits > 1) {
+		qbits >>= 1;
+		qf->metadata->quotient_bits++;
+	}
 
 	qf->metadata->range = qf->metadata->nslots;
 	qf->metadata->range <<= qf->metadata->key_remainder_bits;
@@ -2050,7 +2152,7 @@ int64_t qf_resize_malloc(QF *qf, uint64_t nslots)
 	int64_t ret_numkeys = 0;
 	do {
 		uint64_t key, value, count;
-		qfi_get_hash(&qfi, &key, &value, &count);
+		//qfi_get_hash(&qfi, &key, &count);
 		qfi_next(&qfi);
 		int ret = qf_insert(&new_qf, key, value, count, QF_NO_LOCK | QF_KEY_IS_HASH);
 		if (ret < 0) {
@@ -2091,7 +2193,7 @@ uint64_t qf_resize(QF* qf, uint64_t nslots, void* buffer, uint64_t buffer_len)
 	qf_iterator_from_position(qf, &qfi, 0);
 	do {
 		uint64_t key, value, count;
-		qfi_get_hash(&qfi, &key, &value, &count);
+		//qfi_get_hash(&qfi, &key, &count);
 		qfi_next(&qfi);
 		int ret = qf_insert(&new_qf, key, value, count, QF_NO_LOCK | QF_KEY_IS_HASH);
 		if (ret < 0) {
@@ -2208,7 +2310,8 @@ int qf_insert(QF *qf, uint64_t key, uint64_t value, uint64_t count, uint8_t flag
 	}
 	uint64_t hash = ((key << qf->metadata->value_bits) | (value & BITMASK(qf->metadata->value_bits))) % qf->metadata->range;
 	
-	uint64_t found_index, found_hash, found_hash_len;
+	uint64_t found_index, found_hash;
+	int found_hash_len;
 	int ret = insert(qf, hash, count, &found_index, &found_hash, &found_hash_len, flags);
 
 	/*
@@ -2244,7 +2347,8 @@ int qf_insert(QF *qf, uint64_t key, uint64_t value, uint64_t count, uint8_t flag
 int qf_set_count(QF *qf, uint64_t key, uint64_t value, uint64_t count, uint8_t
 								 flags)
 {
-	if (count == 0)
+	return 0;
+	/*if (count == 0)
 		return 0;
 
 	uint64_t cur_count = qf_count_key_value(qf, key, value, flags);
@@ -2258,7 +2362,7 @@ int qf_set_count(QF *qf, uint64_t key, uint64_t value, uint64_t count, uint8_t
 	else
 		ret = qf_remove(qf, key, value, labs(delta), flags);
 
-	return ret;
+	return ret;*/
 }
 
 int qf_remove(QF *qf, uint64_t key, uint64_t *ret_hash, int *ret_hash_len, uint8_t flags)
@@ -2334,96 +2438,51 @@ uint64_t qf_query(const QF *qf, uint64_t key, uint64_t *ret_index, uint64_t *ret
 	// Convert key to hash
 	if (GET_KEY_HASH(flags) != QF_KEY_IS_HASH) {
 		if (qf->metadata->hash_mode == QF_HASH_DEFAULT)
-			key = MurmurHash64A(((void *)&key), sizeof(key),
-													qf->metadata->seed) % qf->metadata->range;
+			key = MurmurHash64A(((void *)&key), sizeof(key), qf->metadata->seed) % qf->metadata->range;
 		else if (qf->metadata->hash_mode == QF_HASH_INVERTIBLE)
 			key = hash_64(key, BITMASK(qf->metadata->key_bits));
 	}
 	//uint64_t hash = (key << qf->metadata->value_bits) | (value & BITMASK(qf->metadata->value_bits));
-  uint64_t hash = key;
+	uint64_t hash = key;
 	uint64_t hash_remainder   = hash & BITMASK(qf->metadata->bits_per_slot);
-	int64_t hash_bucket_index = (hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+	uint64_t hash_bucket_index = (hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
 
 	// If no one wants this slot, we can already say for certain the item is not in the filter
 	if (!is_occupied(qf, hash_bucket_index))
 		return 0;
 
 	// Otherwise, find the start of the run (all the items that want that slot) and parse for the remainder we're looking for
-	int64_t runstart_index = hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1;
+	uint64_t runstart_index = hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1;
 	if (runstart_index < hash_bucket_index)
 		runstart_index = hash_bucket_index;
 
-	/* printf("MC RUNSTART: %02lx RUNEND: %02lx\n", runstart_index, runend_index); */
-
-	// Look through the run and attempt to find an item that matches the hash
-	/*uint64_t current_index = runstart_index;
-	// For each item from the start of the run until the first runend
-	do {
-		if (!is_extension(qf, current_index) && !is_counter(qf, current_index) && match(qf, current_index, hash)) {
-			if (ret_index != NULL) *ret_index = current_index;
-			uint64_t item_hash, item_hash_len, item_count, item_count_len;
-			get_item_info(qf, current_index, &item_hash, &item_hash_len, &item_count, &item_count_len);
-			if (ret_hash != NULL) *ret_hash = item_hash;
-			if (ret_hash_len != NULL) *ret_hash_len = item_hash_len;
-			//printf("query end\n");
-			return 1;
+	// "optimized" query
+	uint64_t current_index = runstart_index;
+	do { // for each slot containing the start of an item:
+		if (get_slot(qf, current_index) == hash_remainder) { // if first slot matches, check remaining extensions
+			uint64_t ext, count;
+			int ext_len, count_len;
+			get_slot_info(qf, current_index, &ext, &ext_len, &count, &count_len);
+			if (((hash >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) & BITMASK(qf->metadata->bits_per_slot * ext_len)) == ext) { // if extensions match, return the count
+				if (ret_index != NULL) *ret_index = current_index;
+				if (ret_hash != NULL) *ret_hash = (hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) | (ext << (qf->metadata->quotient_bits + qf->metadata->bits_per_slot));
+				if (ret_hash_len != NULL) *ret_hash_len = (qf->metadata->bits_per_slot * ext_len) + qf->metadata->quotient_bits + qf->metadata->bits_per_slot;
+				return count;
+			}
+			if (is_runend(qf, current_index++)) break; // if extensions don't match, stop if end of run, skip to next item otherwise
+			current_index += ext_len + count_len;
 		}
-		match(qf, current_index, hash);
-	} while (!is_runend(qf, current_index++) && current_index < qf->metadata->xnslots);*/
-
-  // "optimized" query
-  uint64_t current_index = runstart_index;
-  do { // for each slot containing the start of an item:
-    if (get_slot(qf, current_index) == hash_remainder) { // if first slot matches, check remaining extensions
-      uint64_t ext, count;
-      int ext_len, count_len;
-      get_slot_info(qf, current_index, &ext, &ext_len, &count, &count_len);
-      if (((hash >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) & BITMASK(qf->metadata->bits_per_slot * ext_len)) == ext) { // if extensions match, return the count
-        if (ret_index != NULL) *ret_index = current_index;
-        if (ret_hash != NULL) *ret_hash = (hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) | (ext << (qf->metadata->quotient_bits + qf->metadata->bits_per_slot));
-        if (ret_hash_len != NULL) *ret_hash_len = (qf->metadata->bits_per_slot * ext_len) + qf->metadata->quotient_bits + qf->metadata->bits_per_slot;
-        return count;
-      }
-      if (is_runend(qf, current_index++)) break; // if extensions don't match, stop if end of run, skip to next item otherwise
-      current_index += ext_len + count_len;
-    }
-    else { // if first slot doesn't match, stop if end of run, skip to next item otherwise
-      if (is_runend(qf, current_index++)) break;
-      while (is_extension(qf, current_index)) current_index++;
-      while (is_counter(qf, current_index)) current_index++;
-    }
-  } while (current_index < qf->metadata->xnslots); // stop if reached the end of all items (should never actually reach this point because should stop at the runend)
+		else { // if first slot doesn't match, stop if end of run, skip to next item otherwise
+			if (is_runend(qf, current_index++)) break;
+			while (is_extension_or_counter(qf, current_index)) current_index++;
+		}
+	} while (current_index < qf->metadata->xnslots); // stop if reached the end of all items (should never actually reach this point because should stop at the runend)
 
 	return 0;
 }
 
-int match(const QF *qf, int64_t index, uint64_t hash) { // Takes an index and hash and matches fingerprint with hash (including extensions)
-	if ((hash & BITMASK(qf->metadata->bits_per_slot)) != get_slot(qf, index)) {
-		return 0;
-	}
-	
-	hash /= qf->metadata->range;
-	index += 1;
-	while (is_extension(qf, index)) {
-		if ((hash & BITMASK(qf->metadata->bits_per_slot)) != get_slot(qf, index)) {
-			return 0;
-		}
-		index += 1;
-		hash >>= qf->metadata->bits_per_slot;
-	}
-	return 1;
-}
-
-int get_slot_info(const QF *qf, uint64_t index, uint64_t *ext, int *ext_slots, uint64_t *count, int *count_slots) {
-	/*if (is_extension(qf, index) || is_counter(qf, index)) {
-		bp1(qf, index, index % 64, 0);
-		*ext = -1;
-		*ext_slots = 0;
-		*count = 1;
-		*count_slots = 0;
-		return 1;
-	}*/
-	assert(!is_extension(qf, index) && !is_counter(qf, index));
+static inline int get_slot_info(const QF *qf, uint64_t index, uint64_t *ext, int *ext_slots, uint64_t *count, int *count_slots) {
+	assert(!is_extension_or_counter(qf, index));
 
 	int curr = ++index;
 	if (ext != NULL) {
@@ -2452,95 +2511,46 @@ int get_slot_info(const QF *qf, uint64_t index, uint64_t *ext, int *ext_slots, u
 	return 1;
 }
 
-uint64_t get_item_hash(const QF *qf, uint64_t index) {
-	if (is_extension(qf, index) || is_counter(qf, index)) {
-		return 0;
-	}
-	uint64_t hash = get_slot(qf, index);
-	
-	while (is_extension(qf, ++index)) {
-		hash = (hash << qf->metadata->bits_per_slot) | get_slot(qf, index);
-	}
-	return hash;
-}
-
-// Looks at an index, gets full hash including extensions, gets count, returns number of slots used by each
-int get_item_info(const QF *qf, uint64_t index, uint64_t *hash, uint64_t *hash_slots_used, uint64_t *count, uint64_t *count_slots_used) {
-	if (is_extension(qf, index) || is_counter(qf, index)) {
-		return 0;
-	}
-	if (hash == NULL) {
-		printf("segfault here\n");
-		return 0;
-	}
-	*hash = get_slot(qf, index);
-	/*if (*hash == QF_NO_SPACE) {
-		return QF_NO_SPACE;
-	}*/
-	*hash_slots_used = qf->metadata->bits_per_slot;
-	
-	while (is_extension(qf, ++index)) {
-		*hash = *hash | (get_slot(qf, index) << *hash_slots_used);
-		*hash_slots_used += qf->metadata->bits_per_slot;
-	}
-	if (is_counter(qf, index)) {
-		*count_slots_used = 1;
-		*count = get_slot(qf, index);
-		while (is_counter(qf, ++index)) {
-			*count_slots_used++;
-			*count = (*count << qf->metadata->bits_per_slot) | get_slot(qf, index);
-		}
-	}
-	else {
-		*count_slots_used = 0;
-		*count = 1;
-	}
-	return 1;
-}
-
-int adapt(QF *qf, uint64_t index, uint64_t hash_bucket_index, uint64_t hash, uint64_t other_hash, uint64_t *ret_hash) {
+static inline int adapt(QF *qf, uint64_t index, uint64_t hash_bucket_index, uint64_t hash, uint64_t other_hash, uint64_t *ret_hash) {
 	uint64_t ext, count;
-  int ext_len, count_len;
+	int ext_len, count_len;
 	// figure out how many extensions there currently are
 	if (!get_slot_info(qf, index, &ext, &ext_len, &count, &count_len)) return 0;
-  assert((hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) == (get_slot(qf, index) | (hash_bucket_index << qf->metadata->bits_per_slot)));
-  int ext_bits = qf->metadata->bits_per_slot * ext_len;
+	assert((hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) == (get_slot(qf, index) | (hash_bucket_index << qf->metadata->bits_per_slot)));
+	int ext_bits = qf->metadata->bits_per_slot * ext_len;
 	*ret_hash = hash & BITMASK(ext_bits + qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
 	int slots_used = ext_len + 1;
 	// get the bits for the next extension
-	hash >>= ext_bits + qf->metadata->quotient_bits + qf->metadata->bits_per_slot;
-	other_hash >>= ext_bits + qf->metadata->quotient_bits + qf->metadata->bits_per_slot;
+	hash >>= ext_bits + qf->metadata->quotient_bits;
+	other_hash >>= ext_bits + qf->metadata->quotient_bits;
 
+	do {
+		hash >>= qf->metadata->bits_per_slot;
+		other_hash >>= qf->metadata->bits_per_slot;
 
-  /*do {
-    hash >>= qf->metadata->bits_per_slot;
-    other_hash >>= qf->metadata->bits_per_slot;
-    uint64_t empty_slot_index = find_first_empty_slot(qf, index + slots_used);
-    if (empty_slot_index >= qf->metadata->xnslots) {
-      return QF_NO_SPACE;
-    }
+		uint64_t empty_slot_index = find_first_empty_slot(qf, index + slots_used);
+		if (empty_slot_index >= qf->metadata->xnslots) return QF_NO_SPACE; // maybe should do something about the now extraneous slots? allows for false negative
 
-    shift_remainders(qf, index + slots_used, empty_slot_index);
-    set_slot(qf, index + slots_used, hash & BITMASK(qf->metadata->bits_per_slot));
-    shift_runends(qf, index + slots_used, empty_slot_index - 1, 1);
+		shift_remainders(qf, index + slots_used, empty_slot_index);
 
-    *ret_hash |= (hash & BITMASK(qf->metadata->bits_per_slot)) << (ext_bits + qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
+		set_slot(qf, index + slots_used, hash & BITMASK(qf->metadata->bits_per_slot));
+		*ret_hash |= (hash & BITMASK(qf->metadata->bits_per_slot)) << (ext_bits + qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
 
-    uint64_t i;
-    for (i = hash_bucket_index / QF_SLOTS_PER_BLOCK + 1; i <= empty_slot_index / QF_SLOTS_PER_BLOCK; i++) {
-      if (get_block(qf, i)->offset < BITMASK(8 * sizeof(qf->blocks[0].offset))) get_block(qf, i)->offset++;
-      assert(get_block(qf, i)->offset != 0);
-    }
+		shift_runends(qf, index + slots_used, empty_slot_index - 1, 1);
 
-    METADATA_WORD(qf, extensions, index) |= 1ULL << ((index + slots_used) % 64);
-    modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
-    slots_used++;
-    ext_bits += qf->metadata->bits_per_slot;
-  } while (((hash & BITMASK(qf->metadata->bits_per_slot)) == (other_hash & BITMASK(qf->metadata->bits_per_slot))) && (ext_bits + qf->metadata->quotient_bits + qf->metadata->bits_per_slot < 64));*/
+		uint64_t i;
+		for (i = hash_bucket_index / QF_SLOTS_PER_BLOCK + 1; i <= empty_slot_index / QF_SLOTS_PER_BLOCK; i++) {
+			if (get_block(qf, i)->offset < BITMASK(8 * sizeof(qf->blocks[0].offset))) get_block(qf, i)->offset++;
+		}
 
+		METADATA_WORD(qf, extensions, index + slots_used) |= 1ULL << ((index + slots_used) % 64);
+		modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
+		slots_used++;
+		ext_bits += qf->metadata->bits_per_slot;
+	} while (((hash & BITMASK(qf->metadata->bits_per_slot)) == (other_hash & BITMASK(qf->metadata->bits_per_slot))) && (ext_bits + qf->metadata->quotient_bits + qf->metadata->bits_per_slot < 64));
 
 	// while the hash and other_hash match on these bits, insert an extension slot
-	while (((hash & BITMASK(qf->metadata->bits_per_slot)) == (other_hash & BITMASK(qf->metadata->bits_per_slot))) && (ext_bits + qf->metadata->quotient_bits + 2 * qf->metadata->bits_per_slot < 64)) {
+	/*while (((hash & BITMASK(qf->metadata->bits_per_slot)) == (other_hash & BITMASK(qf->metadata->bits_per_slot))) && (ext_bits + qf->metadata->quotient_bits + 2 * qf->metadata->bits_per_slot < 64)) {
 		uint64_t empty_slot_index = find_first_empty_slot(qf, index + slots_used); // find the first empty slot
 		if (empty_slot_index >= qf->metadata->xnslots) {
 			return QF_NO_SPACE;
@@ -2590,7 +2600,7 @@ int adapt(QF *qf, uint64_t index, uint64_t hash_bucket_index, uint64_t hash, uin
 	
 	METADATA_WORD(qf, extensions, index + slots_used) |= 1ULL << ((index + slots_used) % 64);
 	modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
-	ext_bits += qf->metadata->bits_per_slot;
+	ext_bits += qf->metadata->bits_per_slot;*/
 	
 	return ext_bits + qf->metadata->quotient_bits + qf->metadata->bits_per_slot;
 }
@@ -2602,13 +2612,9 @@ int adapt(QF *qf, uint64_t index, uint64_t hash_bucket_index, uint64_t hash, uin
 	returns the length of the resulting fingerprint
 */
 int qf_adapt(QF *qf, uint64_t index, uint64_t hash, uint64_t other_hash, uint64_t *ret_hash, uint8_t flags) {
-	if (qf_get_num_occupied_slots(qf) == 24101) {
-		bp1(qf, 0, 0, 0);
-	}
-	if (hash == other_hash) {
-		return 0;
-	}
-	
+	record(qf, "adapt", hash);
+
+	if (hash == other_hash) return 0;
 	return adapt(qf, index, (hash % qf->metadata->range) >> qf->metadata->bits_per_slot, hash, other_hash, ret_hash);
 }
 
@@ -2829,20 +2835,13 @@ int64_t qf_iterator_from_key_value(const QF *qf, QFi *qfi, uint64_t key,
 	return qfi->current;
 }
 
-static int qfi_get(const QFi *qfi, uint64_t *key, uint64_t *value, uint64_t
-									 *count)
+static inline int qfi_get(const QFi *qfi, uint64_t *rem, uint64_t *ext, uint64_t *ext_len, uint64_t *count)
 {
-	if (qfi_end(qfi))
-		return QFI_INVALID;
+	if (qfi_end(qfi)) return QFI_INVALID;
 
-	uint64_t current_remainder, current_count;
-	//printf("2565");
-	decode_counter(qfi->qf, qfi->current, &current_remainder, &current_count);
-
-	*value = current_remainder & BITMASK(qfi->qf->metadata->value_bits);
-	current_remainder = current_remainder >> qfi->qf->metadata->value_bits;
-	*key = (qfi->run << qfi->qf->metadata->key_remainder_bits) | current_remainder;
-	*count = current_count;
+	int count_len;
+	get_slot_info(qfi->qf, qfi->current, ext, ext_len, count, &count_len);
+	*rem = get_slot(qfi->qf, qfi->current);
 
 	return 0;
 }
@@ -2851,7 +2850,7 @@ int qfi_get_key(const QFi *qfi, uint64_t *key, uint64_t *value, uint64_t
 								*count)
 {
 	*key = *value = *count = 0;
-	int ret = qfi_get(qfi, key, value, count);
+	int ret = 0;// = qfi_get(qfi, key, count);
 	if (ret == 0) {
 		if (qfi->qf->metadata->hash_mode == QF_HASH_DEFAULT) {
 			*key = 0; *value = 0; *count = 0;
@@ -2863,11 +2862,10 @@ int qfi_get_key(const QFi *qfi, uint64_t *key, uint64_t *value, uint64_t
 	return ret;
 }
 
-int qfi_get_hash(const QFi *qfi, uint64_t *key, uint64_t *value, uint64_t
-								 *count)
+int qfi_get_hash(const QFi *qfi, uint64_t *rem, uint64_t *ext, uint64_t *ext_len, uint64_t *count)
 {
-	*key = *value = *count = 0;
-	return qfi_get(qfi, key, value, count);
+	*rem = *ext = *ext_len = *count = 0;
+	return qfi_get(qfi, rem, ext, ext_len, count);
 }
 
 int qfi_next(QFi *qfi)
@@ -2876,46 +2874,28 @@ int qfi_next(QFi *qfi)
 		return QFI_INVALID;
 	else {
 		/* move to the end of the current counter*/
-		uint64_t current_remainder, current_count;
-		//printf("2606");
-		//if (qfi->current >= 256) return QF_NO_SPACE;
-		qfi->current = decode_counter(qfi->qf, qfi->current, &current_remainder,
-																	&current_count);
-		
-		if (!is_runend(qfi->qf, qfi->current)) {
-			qfi->current++;
-#ifdef LOG_CLUSTER_LENGTH
-			qfi->cur_length++;
-#endif
-			if (qfi_end(qfi))
-				return QFI_INVALID;
-			return 0;
-		} else {
+		//uint64_t current_remainder, current_count;
+		//qfi->current = decode_counter(qfi->qf, qfi->current, &current_remainder, &current_count);
+		int was_runend = is_runend(qfi->qf, qfi->current++);
+		while (is_extension_or_counter(qfi->qf, qfi->current)) qfi->current++;
+		if (qfi_end(qfi)) return QFI_INVALID;
+		if (!was_runend) return 0;
+		else {
 #ifdef LOG_CLUSTER_LENGTH
 			/* save to check if the new current is the new cluster. */
 			uint64_t old_current = qfi->current;
 #endif
 			uint64_t block_index = qfi->run / QF_SLOTS_PER_BLOCK;
-			uint64_t rank = bitrank(get_block(qfi->qf, block_index)->occupieds[0],
-															qfi->run % QF_SLOTS_PER_BLOCK);
-			uint64_t next_run = bitselect(get_block(qfi->qf,
-																							block_index)->occupieds[0],
-																		rank);
-			if (next_run == 64) {
-				rank = 0;
-				while (next_run == 64 && block_index < qfi->qf->metadata->nblocks) {
-					block_index++;
-					next_run = bitselect(get_block(qfi->qf, block_index)->occupieds[0],
-															 rank);
-				}
-			}
+			uint64_t rank = bitrank(get_block(qfi->qf, block_index)->occupieds[0], qfi->run % QF_SLOTS_PER_BLOCK);
+			uint64_t next_run = bitselect(get_block(qfi->qf, block_index)->occupieds[0], rank); // find next bucket
+			while (next_run == 64 && block_index < qfi->qf->metadata->nblocks) next_run = bitselect(get_block(qfi->qf, ++block_index)->occupieds[0], 0); // if next bucket is in another block
+
 			if (block_index == qfi->qf->metadata->nblocks) {
 				/* set the index values to max. */
 				qfi->run = qfi->current = qfi->qf->metadata->xnslots;
 				return QFI_INVALID;
 			}
 			qfi->run = block_index * QF_SLOTS_PER_BLOCK + next_run;
-			qfi->current++;
 			if (qfi->current < qfi->run)
 				qfi->current = qfi->run;
 #ifdef LOG_CLUSTER_LENGTH
@@ -2954,7 +2934,7 @@ bool qfi_end(const QFi *qfi)
  * insert(min, ic) 
  * increment either ia or ib, whichever is minimum.
  */
-void qf_merge(const QF *qfa, const QF *qfb, QF *qfc)
+/*void qf_merge(const QF *qfa, const QF *qfb, QF *qfc)
 {
 	QFi qfia, qfib;
 	qf_iterator_from_position(qfa, &qfia, 0);
@@ -2968,34 +2948,195 @@ void qf_merge(const QF *qfa, const QF *qfb, QF *qfc)
 		exit(1);
 	}
 
-	uint64_t keya, valuea, counta, keyb, valueb, countb;
-	qfi_get_hash(&qfia, &keya, &valuea, &counta);
-	qfi_get_hash(&qfib, &keyb, &valueb, &countb);
+	uint64_t keya, counta, keyb, countb;
+	uint64_t ret_index, ret_hash, ret_other_hash;
+	int ret_hash_len;
+	qfi_get_hash(&qfia, &keya, &counta);
+	qfi_get_hash(&qfib, &keyb, &countb);
 	do {
 		if (keya < keyb) {
-			qf_insert(qfc, keya, valuea, counta, QF_NO_LOCK | QF_KEY_IS_HASH);
-			qfi_next(&qfia);
-			qfi_get_hash(&qfia, &keya, &valuea, &counta);
+			if (!qf_insert_ret(qfc, keya, counta, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH)) {
+				insert_and_extend(qfc, ret_index, keya, counta, keya, &ret_hash, &ret_other_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
+			}
+			qfi_next(&qfia); // change to new schema DONE
+			qfi_get_hash(&qfia, &keya, &counta); // get extensions as well? DONE
 		}
 		else {
-			qf_insert(qfc, keyb, valueb, countb, QF_NO_LOCK | QF_KEY_IS_HASH);
+			if (!qf_insert_ret(qfc, keyb, countb, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH)) {
+				insert_and_extend(qfc, ret_index, keyb, countb, keyb, &ret_hash, &ret_other_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
+			}
 			qfi_next(&qfib);
-			qfi_get_hash(&qfib, &keyb, &valueb, &countb);
+			qfi_get_hash(&qfib, &keyb, &countb);
 		}
 	} while(!qfi_end(&qfia) && !qfi_end(&qfib));
 
 	if (!qfi_end(&qfia)) {
 		do {
-			qfi_get_hash(&qfia, &keya, &valuea, &counta);
-			qf_insert(qfc, keya, valuea, counta, QF_NO_LOCK | QF_KEY_IS_HASH);
+			qfi_get_hash(&qfia, &keya, &counta);
+			if (!qf_insert_ret(qfc, keya, counta, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH)) {
+				insert_and_extend(qfc, ret_index, keya, counta, keya, &ret_hash, &ret_other_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
+			}
 		} while(!qfi_next(&qfia));
 	}
 	if (!qfi_end(&qfib)) {
 		do {
-			qfi_get_hash(&qfib, &keyb, &valueb, &countb);
-			qf_insert(qfc, keyb, valueb, countb, QF_NO_LOCK | QF_KEY_IS_HASH);
+			qfi_get_hash(&qfib, &keyb, &countb);
+			if (!qf_insert_ret(qfc, keyb, countb, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH)) {
+				insert_and_extend(qfc, ret_index, keyb, countb, keyb, &ret_hash, &ret_other_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
+			}
 		} while(!qfi_next(&qfib));
 	}
+}*/
+
+static inline int _finger_cmp(uint64_t bits_per_item, uint64_t rema, uint64_t exta, uint64_t extlena, uint64_t remb, uint64_t extb, uint64_t extlenb) {
+	if (rema < remb) return -1;
+	else if (remb < rema) return 1;
+	while (exta != extb) {
+		uint64_t a = exta & BITMASK(bits_per_item), b = extb & BITMASK(bits_per_item);
+		if (a < b) return -1;
+		if (b < a) return 1;
+		exta >>= bits_per_item;
+		extb >>= bits_per_item;
+	}
+	if (extlena == extlenb) return 0;
+	if (extlena < extlenb) return -1;
+	else return 1;
+}
+
+/* Specifically for use while merging
+ * Inserts a full item at the given index
+ * Assumes all of the slots from this index onwards are unused
+ */
+static inline uint64_t _merge_insert(QF *qf, uint64_t index, uint64_t rem, uint64_t ext, uint64_t ext_len, uint64_t count) {
+	uint64_t current = index;
+	set_slot(qf, current++, rem);
+	for (int i = 0; i < ext_len; i++) {
+		set_slot(qf, current, ext & BITMASK(qf->metadata->bits_per_slot));
+		ext >>= qf->metadata->bits_per_slot;
+		METADATA_WORD(qf, extensions, current) |= (1ULL << (current % QF_SLOTS_PER_BLOCK));
+		current++;
+	}
+	if (count > 1) while (count > 0) {
+		set_slot(qf, current, count & BITMASK(qf->metadata->bits_per_slot));
+		count >>= qf->metadata->bits_per_slot;
+		METADATA_WORD(qf, extensions, current) |= (1ULL << (current % QF_SLOTS_PER_BLOCK));
+		METADATA_WORD(qf, runends, current) |= (1ULL << (current % QF_SLOTS_PER_BLOCK));
+		current++;
+	}
+	return current;
+}
+
+void qf_merge(const QF *qfa, const QF *qfb, QF *qfc) {
+	int slots_per_block = QF_SLOTS_PER_BLOCK;
+	assert(qf_get_num_occupied_slots(qfc) == 0);
+	assert(qfc->metadata->xnslots > qf_get_num_occupied_slots(qfa) + qf_get_num_occupied_slots(qfb));
+
+	uint64_t current_run = 0;
+	uint64_t current_index = 0;
+	uint64_t last_index = -1;
+
+	QFi qfia, qfib;
+	qf_iterator_from_position(qfa, &qfia, 0);
+	qf_iterator_from_position(qfb, &qfib, 0);
+
+	if (qfa->metadata->hash_mode != qfc->metadata->hash_mode &&
+			qfa->metadata->seed != qfc->metadata->seed &&
+			qfb->metadata->hash_mode  != qfc->metadata->hash_mode &&
+			qfb->metadata->seed  != qfc->metadata->seed) {
+		fprintf(stderr, "Output QF and input QFs do not have the same hash mode or seed.\n");
+		exit(1);
+	}
+
+	uint64_t rema, exta, extlena, counta;
+	uint64_t remb, extb, extlenb, countb;
+	uint64_t ret_index, ret_hash, ret_other_hash;
+	int ret_hash_len;
+	qfi_get_hash(&qfia, &rema, &exta, &extlena, &counta);
+	qfi_get_hash(&qfib, &remb, &extb, &extlenb, &countb);
+	if (qfia.run == 0 || qfib.run == 0) METADATA_WORD(qfc, occupieds, 0) |= 1;
+	do {
+		if (qfia.run == current_run) {
+			// if both qfa and qfb have more items for this run, add the item with the lower fingerprint
+			if (qfib.run == current_run) {
+				last_index = current_index;
+				switch (_finger_cmp(qfc->metadata->bits_per_slot, rema, exta, extlena, remb, extb, extlenb)) {
+					case 0:
+						current_index = _merge_insert(qfc, current_index, rema, exta, extlena, counta + countb);
+						qfi_next(&qfia);
+						qfi_next(&qfib);
+						qfi_get_hash(&qfia, &rema, &exta, &extlena, &counta);
+						qfi_get_hash(&qfib, &remb, &extb, &extlenb, &countb);
+						break;
+					case -1:
+						current_index = _merge_insert(qfc, current_index, rema, exta, extlena, counta);
+						qfi_next(&qfia);
+						qfi_get_hash(&qfia, &rema, &exta, &extlena, &counta);
+						break;
+					case 1:
+						current_index = _merge_insert(qfc, current_index, remb, extb, extlenb, countb);
+						qfi_next(&qfib);
+						qfi_get_hash(&qfib, &remb, &extb, &extlenb, &countb);
+						break;
+				}
+			}
+			// if qfa has more items for this run but qfb does not, then add all the items from the run in qfa
+			else {
+				do {
+					last_index = current_index;
+					current_index = _merge_insert(qfc, current_index, rema, exta, extlena, counta);
+					qfi_next(&qfia);
+					qfi_get_hash(&qfia, &rema, &exta, &extlena, &counta);
+				} while (qfia.run == current_run);
+			}
+		}
+		else {
+			// if qfb has more items for this run but qfa does not, then add all the items from the run in qfb
+			if (qfib.run == current_run) {
+				do {
+					last_index = current_index;
+					current_index = _merge_insert(qfc, current_index, remb, extb, extlenb, countb);
+					qfi_next(&qfib);
+					qfi_get_hash(&qfib, &remb, &extb, &extlenb, &countb);
+				} while (qfib.run == current_run);
+			}
+			else {
+				if (qfia.run < qfib.run) current_run = qfia.run;
+				else current_run = qfib.run;
+				if (current_index < current_run) current_index = current_run;
+				METADATA_WORD(qfc, occupieds, current_run) |= (1ULL << (current_run % QF_SLOTS_PER_BLOCK));
+				if (last_index != -1) METADATA_WORD(qfc, runends, last_index) |= (1ULL << (last_index % QF_SLOTS_PER_BLOCK));
+			}
+		}
+	} while(!qfi_end(&qfia) && !qfi_end(&qfib));
+
+	if (!qfi_end(&qfia)) {
+		do {
+			if (qfia.run != current_run) {
+				current_run = qfia.run;
+				if (current_index < current_run) current_index = current_run;
+				METADATA_WORD(qfc, occupieds, current_run) |= (1ULL << (current_run % QF_SLOTS_PER_BLOCK));
+				if (last_index != -1) METADATA_WORD(qfc, runends, last_index) |= (1ULL << (last_index % QF_SLOTS_PER_BLOCK));
+			}
+			last_index = current_index;
+			qfi_get_hash(&qfia, &rema, &exta, &extlena, &counta);
+			current_index = _merge_insert(qfc, current_index, rema, exta, extlena, counta);
+		} while(!qfi_next(&qfia));
+	}
+	if (!qfi_end(&qfib)) {
+		do {
+			if (qfib.run != current_run) {
+				current_run = qfib.run;
+				if (current_index < current_run) current_index = current_run;
+				METADATA_WORD(qfc, occupieds, current_run) |= (1 << (current_run % QF_SLOTS_PER_BLOCK));
+				if (last_index != -1) METADATA_WORD(qfc, runends, last_index) |= (1 << (last_index % QF_SLOTS_PER_BLOCK));
+			}
+			last_index = current_index;
+			qfi_get_hash(&qfib, &remb, &extb, &extlenb, &countb);
+			current_index = _merge_insert(qfc, current_index, remb, extb, extlenb, countb);
+		} while(!qfi_next(&qfib));
+	}
+	if (last_index != -1) METADATA_WORD(qfc, runends, last_index) |= (1 << (last_index % QF_SLOTS_PER_BLOCK));
+
 }
 
 /*
@@ -3026,8 +3167,8 @@ void qf_multi_merge(const QF *qf_arr[], int nqf, QF *qfr)
 		uint64_t keys[nqf];
 		uint64_t values[nqf];
 		uint64_t counts[nqf];
-		for (i=0; i<nqf; i++)
-			qfi_get_hash(&qfi_arr[i], &keys[i], &values[i], &counts[i]);
+		for (i=0; i<nqf; i++);
+			//qfi_get_hash(&qfi_arr[i], &keys[i], &counts[i]);
 		
 		do {
 			smallest_key = UINT64_MAX;
@@ -3039,9 +3180,7 @@ void qf_multi_merge(const QF *qf_arr[], int nqf, QF *qfr)
 			qf_insert(qfr, keys[smallest_idx], values[smallest_idx],
 								counts[smallest_idx], QF_NO_LOCK | QF_KEY_IS_HASH);
 			qfi_next(&qfi_arr[smallest_idx]);
-			qfi_get_hash(&qfi_arr[smallest_idx], &keys[smallest_idx],
-									 &values[smallest_idx],
-							&counts[smallest_idx]);
+			//qfi_get_hash(&qfi_arr[smallest_idx], &keys[smallest_idx], &counts[smallest_idx]);
 		} while(!qfi_end(&qfi_arr[smallest_idx]));
 
 		/* remove the qf that is exhausted from the array */
@@ -3054,7 +3193,7 @@ void qf_multi_merge(const QF *qf_arr[], int nqf, QF *qfr)
 		uint64_t iters = 0;
 		do {
 			uint64_t key, value, count;
-			qfi_get_hash(&qfi_arr[0], &key, &value, &count);
+			//qfi_get_hash(&qfi_arr[0], &key, &count);
 			qf_insert(qfr, key, value, count, QF_NO_LOCK | QF_KEY_IS_HASH);
 			qfi_next(&qfi_arr[0]);
 			iters++;
@@ -3095,7 +3234,7 @@ uint64_t qf_inner_product(const QF *qfa, const QF *qfb)
 	do {
 		uint64_t key = 0, value = 0, count = 0;
 		uint64_t count_mem;
-		qfi_get_hash(&qfi, &key, &value, &count);
+		//qfi_get_hash(&qfi, &key, &count);
 		if ((count_mem = qf_count_key_value(qf_mem, key, 0, QF_KEY_IS_HASH)) > 0) {
 			acc += count*count_mem;
 		}
@@ -3131,7 +3270,7 @@ void qf_intersect(const QF *qfa, const QF *qfb, QF *qfr)
 	qf_iterator_from_position(qf_disk, &qfi, 0);
 	do {
 		uint64_t key = 0, value = 0, count = 0;
-		qfi_get_hash(&qfi, &key, &value, &count);
+		//qfi_get_hash(&qfi, &key, &count);
 		if (qf_count_key_value(qf_mem, key, 0, QF_KEY_IS_HASH) > 0)
 			qf_insert(qfr, key, value, count, QF_NO_LOCK | QF_KEY_IS_HASH);
 	} while (!qfi_next(&qfi));

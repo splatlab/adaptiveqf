@@ -62,43 +62,6 @@ double rand_zipfian(double s, double max) {
 	}
 }
 
-int snapshot(QF *qf) {
-        FILE *fp = fopen("data/snapshot.txt", "w");
-        if (fp == NULL) return 0;
-        char buffer1[128];
-        char buffer2[256];
-        bzero(buffer1, 128);
-        bzero(buffer2, 256);
-        int i, j;
-        for (i = 0; i * 64 < qf->metadata->xnslots; i++) {
-                uint64_t occupied = get_block(qf, i)->occupieds[0];
-                for (j = 0; j < 64; j++) {
-                        buffer1[63 - j] = '0' + occupied % 2;
-                        occupied >>= 1;
-                }
-                sprintf(buffer2, "%d\t%s\n", i, buffer1);
-                //printf("%s", buffer2);
-                fputs(buffer2, fp);
-                uint64_t runend = get_block(qf, i)->runends[0];
-                for (j = 0; j < 64; j++) {
-                        buffer1[63 - j] = '0' + runend % 2;
-                        runend >>= 1;
-                }
-                sprintf(buffer2, "\t%s\n", buffer1);
-                //printf("%s", buffer2);
-                fputs(buffer2, fp);
-                uint64_t extension = get_block(qf, i)->extensions[0];
-                for (j = 0; j < 64; j++) {
-                        buffer1[63 - j] = '0' + extension % 2;
-                        extension >>= 1;
-                }
-                sprintf(buffer2, "\t%s\n", buffer1);
-                fputs(buffer2, fp);
-        }
-        fclose(fp);
-        return 1;
-}
-
 int clear_log() {
         FILE *fp = fopen("data/frames.txt", "w");
         if (fp == NULL) return 0;

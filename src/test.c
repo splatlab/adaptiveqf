@@ -25,54 +25,6 @@
 
 #include "sglib.h"
 
-int bp2() {
-	return 0;
-}
-
-int snapshot(QF *qf) {
-	FILE *fp = fopen("data/snapshot.txt", "w");
-	if (fp == NULL) return 0;
-	char buffer1[128];
-	char buffer2[256];
-	bzero(buffer1, 128);
-	bzero(buffer2, 256);
-	int i, j;
-	for (i = 0; i * 64 < qf->metadata->xnslots; i++) {
-		uint64_t occupied = get_block(qf, i)->occupieds[0];
-		for (j = 0; j < 64; j++) {
-			buffer1[63 - j] = '0' + occupied % 2;
-			occupied >>= 1;
-		}
-		sprintf(buffer2, "%d\t%s\n", i, buffer1);
-		//printf("%s", buffer2);
-		fputs(buffer2, fp);
-		uint64_t runend = get_block(qf, i)->runends[0];
-		for (j = 0; j < 64; j++) {
-			buffer1[63 - j] = '0' + runend % 2;
-			runend >>= 1;
-		}
-		sprintf(buffer2, "\t%s\n", buffer1);
-		//printf("%s", buffer2);
-		fputs(buffer2, fp);
-		uint64_t extension = get_block(qf, i)->extensions[0];
-		for (j = 0; j < 64; j++) {
-			buffer1[63 - j] = '0' + extension % 2;
-			extension >>= 1;
-		}
-		sprintf(buffer2, "\t%s\n", buffer1);
-		fputs(buffer2, fp);
-	}
-	fclose(fp);
-	return 1;
-}
-
-int clear_log() {
-	FILE *fp = fopen("data/frames.txt", "w");
-	if (fp == NULL) return 0;
-	fclose(fp);
-	return 1;
-}
-
 uint64_t rand_uniform(uint64_t max) {
   if (max <= RAND_MAX) return rand() % max;
   uint64_t a = rand();
@@ -109,7 +61,7 @@ double rand_zipfian(double s, double max) {
 	}
 }
 
-#define HASH_TABLE_SIZE  88000000
+#define HASH_TABLE_SIZE  85000
 
 struct _ilist {
 	uint64_t val; // the value of the actual item
@@ -152,27 +104,249 @@ void csv_get(char* buffer, int col) {
 	buffer[j] = '\0';
 }
 
+void bp2() {}
+
+void test_insertions(int qbits, int rbits) {
+	QF qf;
+	assert(qf_malloc(&qf, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
+
+	uint64_t ret_index, ret_hash;
+	int ret_hash_len;
+	assert(qf_insert_ret(&qf, 1, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK) > 0);
+	assert(qf_insert_ret(&qf, 1, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK) == 0);
+
+	assert(qf_free(&qf));
+
+	printf("insertion test successful\n");
+}
+
+void test_deletions(int qbits, int rbits) {
+	QF qf;
+	assert(qf_malloc(&qf, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
+
+	uint64_t ret_index, ret_hash, ret_other_hash;
+	int ret_hash_len;
+	assert(qf_insert_ret(&qf, 1, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK) > 0);
+	assert(qf_insert_ret(&qf, 2, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK) > 0);
+	assert(qf_insert_ret(&qf, 1 + (1 << rbits), 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK) > 0);
+	assert(qf_insert_ret(&qf, 1 + (2 << rbits), 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK) > 0);
+	assert(qf_insert_ret(&qf, 2 + (2 << rbits), 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK) > 0);
+
+	assert(qf_query(&qf, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(qf_query(&qf, 2, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(qf_query(&qf, 1 + (1 << rbits), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(qf_query(&qf, 1 + (2 << rbits), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(qf_query(&qf, 2 + (2 << rbits), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(!qf_query(&qf, 3, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(!qf_query(&qf, 1 + (3 << rbits), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+
+	// delete item from run
+	qf_remove(&qf, 2, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK);
+
+	assert(!qf_query(&qf, 2, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(qf_query(&qf, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(qf_query(&qf, 2 + (2 << rbits), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+
+	// delete only item in run
+	qf_remove(&qf, 1 + (1 << rbits), &ret_hash, &ret_hash_len, QF_KEY_IS_HASH);
+
+	assert(!qf_query(&qf, 1 + (1 << rbits), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+
+	// delete runend
+	qf_remove(&qf, 1 + (2 << rbits), &ret_hash, &ret_hash_len, QF_KEY_IS_HASH);
+	
+	assert(!qf_query(&qf, 1 + (2 << rbits), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(qf_query(&qf, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(qf_query(&qf, 2 + (2 << rbits), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+
+	assert(!qf_insert_ret(&qf, 1, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK));
+	assert(insert_and_extend(&qf, ret_index, 1 + (1 << (rbits + qbits)), 2, 1, &ret_hash, &ret_other_hash, QF_KEY_IS_HASH | QF_NO_LOCK));
+	assert(qf_query(&qf, 1 + (1 << (rbits + qbits)), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH) == 2);
+
+	qf_remove(&qf, 1, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH);
+
+	assert(!qf_query(&qf, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(qf_query(&qf, 1 + (1 << (rbits + qbits)), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+
+	qf_remove(&qf, 1 + (1 << (rbits + qbits)), &ret_hash, &ret_hash_len, QF_KEY_IS_HASH);
+
+	assert(!qf_query(&qf, 1 + (1 << (rbits + qbits)), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(qf_query(&qf, 2 + (2 << rbits), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+
+	snapshot(&qf);
+
+	assert(qf_free(&qf));
+	printf("deletion test successful\n");
+}
+
+void test_merge() {
+	int qbits = 6, rbits = 6;
+	QF qfa, qfb, qfc;
+	assert(qf_malloc(&qfa, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
+	assert(qf_malloc(&qfb, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
+	assert(qf_malloc(&qfc, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
+
+	uint64_t ret_index, ret_hash, ret_other_hash;
+	int ret_hash_len;
+	
+	assert(qf_insert_ret(&qfa, 1, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK) > 0);
+	assert(qf_insert_ret(&qfb, 2, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK) > 0);
+	assert(qf_insert_ret(&qfb, 1 + (1 << rbits), 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK) > 0);
+	assert(qf_insert_ret(&qfa, 1 + (1 << (rbits + qbits)), 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK) == 0);
+	assert(insert_and_extend(&qfa, ret_index, 1 + (1 << (rbits + qbits)), 1, 1, &ret_hash, &ret_other_hash, QF_KEY_IS_HASH | QF_NO_LOCK));
+	assert(qf_insert_ret(&qfa, 2, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK) > 0);
+	
+	qf_merge(&qfa, &qfb, &qfc);
+
+	assert(qf_query(&qfc, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(qf_query(&qfc, 2, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH) == 2);
+	assert(qf_query(&qfc, 1 + (1 << rbits), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(qf_query(&qfc, 1 + (1 << (rbits + qbits)), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	assert(!qf_query(&qfc, 1 + (2 << (rbits + qbits)), &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	
+	snapshot(&qfc);
+
+	assert(qf_free(&qfa) && qf_free(&qfb) && qf_free(&qfc));
+	printf("merge test successful\n");
+}
+
+void test_merge_2() {
+	int qbits = 6, rbits = 7;
+	QF qfa, qfb, qfc;
+	assert(qf_malloc(&qfa, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
+	assert(qf_malloc(&qfb, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
+	assert(qf_malloc(&qfc, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
+
+	uint64_t ret_index, ret_hash, ret_other_hash;
+	int ret_hash_len;
+
+	double load = 0.4f;
+	int fill = load * (1 << qbits);
+
+	uint64_t *keys_a = calloc(fill, sizeof(uint64_t));
+	uint64_t *keys_b = calloc(fill, sizeof(uint64_t));
+	for (int i = 0; i < fill; i++) {
+		uint64_t key = rand_uniform(-1);
+		if (!qf_insert_ret(&qfa, key, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH)) i--;
+		else keys_a[i] = key;
+	}
+	for (int i = 0; i < fill; i++) {
+		uint64_t key = rand_uniform(-1);
+		if (!qf_insert_ret(&qfb, key, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH)) i--;
+		else keys_b[i] = key;
+	}
+
+	qf_merge(&qfa, &qfb, &qfc);
+	
+	for (int i = 0; i < fill; i++) {
+		printf("%d\n", i);
+		assert(qf_query(&qfc, keys_a[i], &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+		assert(qf_query(&qfc, keys_b[i], &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+	}
+	for (int i = 0; i < 100000; i++) {
+		uint64_t key = rand_uniform(-1);
+		if (!qf_query(&qfc, key, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH)) {
+			assert(!qf_query(&qfa, key, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH) && !qf_query(&qfb, key, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
+		}
+	}
+
+	assert(qf_free(&qfa) && qf_free(&qfb) && qf_free(&qfc));
+	printf("merge test 2 successful\n");
+}
+
+void test_merge_throughput() {
+	int qbits = 20, rbits = 7;
+	QF qfa, qfb, qfc;
+
+	assert(qf_malloc(&qfa, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
+	assert(qf_malloc(&qfb, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
+	assert(qf_malloc(&qfc, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
+
+	uint64_t ret_index, ret_hash;//, ret_other_hash;
+	int ret_hash_len;
+
+	for (int i = 0; i < (1 << qbits) * 0.4f; i++) {
+		uint64_t j = rand_uniform(-1);
+		if (!qf_insert_ret(&qfa, j, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK)) i--;
+	}
+	for (int i = 0; i < (1 << qbits) * 0.4f; i++) {
+		uint64_t j = rand_uniform(-1);
+		if (!qf_insert_ret(&qfb, j, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK)) i--;
+	}
+
+	clock_t start_time = clock();
+	qf_merge(&qfa, &qfb, &qfc);
+	clock_t end_time = clock();
+
+	printf("total time: %ld\n", end_time - start_time);
+	printf("time per item: %f\n", (double)(end_time - start_time) / ((1 << qbits) * 0.8f));
+}
+
+int insert_key(QF *qf, ilist **htab, uint64_t key, int count) {
+	uint64_t ret_index, ret_hash, ret_other_hash;
+	int ret_hash_len;
+	int ret = qf_insert_ret(qf, key, count, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH); // attempt to insert
+	if (ret == QF_NO_SPACE) {
+		return 0;
+	}
+	else if (ret == 0) { // if a matching fingerprint is found, search hash table for original item
+		ilist ii, *nn;
+		ii.rem = ret_hash;
+		ii.len = ret_hash_len;
+		ilist *item_in_table = sglib_hashed_ilist_find_member(htab, &ii);
+		if (item_in_table == NULL) {
+			printf("error:\tfilter claimed to have fingerprint %lu but hashtable could not find it\n", ii.rem);
+		}
+		else if (item_in_table->val == key) {
+			insert_and_extend(qf, ret_index, key, count, key, &ret_hash, &ret_other_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
+		}
+		else if (1){
+			int ext_len = insert_and_extend(qf, ret_index, key, count, item_in_table->val, &ret_hash, &ret_other_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
+			if (ext_len == QF_NO_SPACE) {
+				printf("filter is full after insert_and_extend\n");
+				return 0;
+			}
+			sglib_hashed_ilist_delete(htab, item_in_table);
+			item_in_table->rem = ret_other_hash;
+			item_in_table->len = ext_len;
+			sglib_hashed_ilist_add(htab, item_in_table);
+
+			nn = malloc(sizeof(ilist));
+			nn->val = key;
+			nn->rem = ret_hash;
+			nn->len = ext_len;
+			sglib_hashed_ilist_add(htab, nn);
+		}
+	}
+	else if (ret == 1) {
+		ilist *nn = malloc(sizeof(ilist));
+		nn->val = key;
+		nn->rem = ret_hash;
+		nn->len = ret_hash_len;
+		sglib_hashed_ilist_add(htab, nn);
+	}
+	else {
+		printf("other error: errno %d\n", ret);
+		return 0;
+	}
+	return 1;
+}
+
 
 int main(int argc, char **argv)
 {
-	if (argc < 7) {
-		fprintf(stderr, "Please specify \nthe log of the number of slots in the QF\nthe number of remainder bits in the QF\nthe universe size\nthe number of inserts\nthe number of queries\nthe number of trials\n");
-		// eg. ./test 8 7 100000000 20000000 1000000 20
-		// ./test 16 7 100000000 20000000 1000000 1 0
-    // ./test 16 7 -1 $((1 << 15)) 1000000 1 0
-		exit(1);
+	uint64_t seed = 0;
+	if (argc > 1) {
+		seed = strtoull(argv[1], NULL, 10);
 	}
-	if (argc >= 8) {
-		srand(strtol(argv[7], NULL, 10));
-		printf("running test on seed %ld\n", strtol(argv[7], NULL, 10));
-	}
-	else {
-		time_t seed = time(NULL);
-		printf("running test on seed %ld\n", seed);
-		srand(seed);
-	}
-	
-	clear_log();
+	printf("running tests on seed %lu\n", seed);
+	srand(seed);
+
+	//test_deletions(6, 7);
+	start_recording();
+	test_merge_throughput();
+	stop_recording();
+	return 0;
 	
 	uint64_t qbits = atoi(argv[1]);
 	uint64_t rbits = atoi(argv[2]);
@@ -224,75 +398,6 @@ int main(int argc, char **argv)
 		//uint64_t *ret_other_hash = malloc(sizeof(uint64_t));
 		int *ret_hash_len = malloc(sizeof(int));
 		
-		/*printf("insert returned %lu\n", qf_insert(&qf, 1, 0, 1, QF_NO_LOCK | QF_KEY_IS_HASH));
-		printf("insert returned %lu\n", qf_insert(&qf, 2, 0, 1, QF_NO_LOCK | QF_KEY_IS_HASH));
-		
-		printf("query returned %lu\n", qf_query(&qf, 1, 0, ret_index, ret_hash, QF_KEY_IS_HASH));
-		printf("query returned %lu\n", qf_query(&qf, 2, 0, ret_index, ret_hash, QF_KEY_IS_HASH));
-		printf("query returned %lu\n", qf_query(&qf, 3, 0, ret_index, ret_hash, QF_KEY_IS_HASH));
-		
-		printf("adapt returned %d\n", qf_adapt(&qf, 1, 1, (1ULL << 32) | 1ULL, QF_KEY_IS_HASH));
-		printf("adapt returned %d\n", qf_adapt(&qf, 0, 2, (1ULL << 32) | 2ULL, QF_KEY_IS_HASH));
-		
-		printf("query returned %lu\n", qf_query(&qf, 1, 0, ret_index, ret_hash, QF_KEY_IS_HASH));
-		printf("query returned %lu\n", qf_query(&qf, (1ULL << 32) | 1ULL, 0, ret_index, ret_hash, QF_KEY_IS_HASH));
-		printf("query returned %lu\n", qf_query(&qf, 2, 0, ret_index, ret_hash, QF_KEY_IS_HASH));
-		printf("query returned %lu\n", qf_query(&qf, (1ULL << 32) | 2ULL, 0, ret_index, ret_hash, QF_KEY_IS_HASH));*/
-		
-		/*qf_insert_ret(&qf, 1, 0, 1, QF_KEY_IS_HASH, ret_index, ret_hash, ret_hash_len);
-		printf("collided query expected, got %d\n", qf_insert_ret(&qf, 1 + qf.metadata->range, 0, 1, QF_KEY_IS_HASH | QF_NO_LOCK, ret_index, ret_hash, ret_hash_len));
-		printf("extended length: %d\n", insert_and_extend(&qf, *ret_index, 1 + qf.metadata->range, 0, 1, 1, 0, QF_KEY_IS_HASH | QF_NO_LOCK));*/
-		
-		// testing extending on insert
-		/*assert(qf_insert_ret(&qf, 1, 0, 1, QF_KEY_IS_HASH, ret_index, ret_hash, ret_hash_len)); // insert 1
-		assert(qf_query(&qf, 1, 0, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(qf_query(&qf, 1 + (2 << (qbits + rbits)), 0, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(!qf_insert_ret(&qf, 1 + (1 << (qbits + rbits)), 0, 1, QF_KEY_IS_HASH, ret_index, ret_hash, ret_hash_len)); // try insert 11
-		assert(insert_and_extend(&qf, *ret_index, 1 + (1 << (qbits + rbits)), 0, 1, 1, 0, ret_hash, ret_other_hash, QF_KEY_IS_HASH | QF_NO_LOCK) > 0); // insert 11
-		assert(qf_query(&qf, 1, 0, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(qf_query(&qf, 1 + (1 << (qbits + rbits)), 0, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(qf_query(&qf, 1 + (1lu << (qbits + 2*rbits)), 0, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(!qf_insert_ret(&qf, 1 + (1lu << (qbits + 2*rbits)), 0, 1, QF_KEY_IS_HASH, ret_index, ret_hash, ret_hash_len)); // try insert 101
-		assert(insert_and_extend(&qf, *ret_index, 1 + (1lu << (qbits + 2*rbits)), 0, 1, 1, 0, ret_hash, ret_other_hash, QF_KEY_IS_HASH | QF_NO_LOCK) > 0); // insert 101
-		assert(!qf_query(&qf, 1 + (2 << (qbits + rbits)), 0, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(qf_insert_ret(&qf, 1 + (2 << (qbits + rbits)), 0, 1, QF_KEY_IS_HASH, ret_index, ret_hash, ret_hash_len)); // insert 21
-		assert(qf_query(&qf, 1 + (2 << (qbits + rbits)), 0, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		abort();*/
-		
-		// testing extending on false positive query
-		/*qf_insert_ret(&qf, 1, 1, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH);
-		assert(qf_query(&qf, 1, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(!qf_query(&qf, 2, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(!qf_query(&qf, 1 + (1 << rbits), ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(qf_query(&qf, 1 + (1 << (qbits + rbits)), ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		
-		assert(qf_adapt(&qf, *ret_index, 1, 1 + (1 << (qbits + rbits)), ret_hash, QF_KEY_IS_HASH) > 0);
-		assert(qf_query(&qf, 1, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(!qf_query(&qf, 2, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(!qf_query(&qf, 1 + (1 << (qbits + rbits)), ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(!qf_query(&qf, 1 + (2 << (qbits + rbits)), ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(qf_query(&qf, 1 + (1 << (qbits + 2*rbits)), ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		
-		assert((*ret_hash_len = qf_adapt(&qf, *ret_index, 1, 1 + (1 << (qbits + 2*rbits)), ret_hash, QF_KEY_IS_HASH)) > 0);
-		assert(qf_query(&qf, 1, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(!qf_query(&qf, 1 + (1 << (qbits + rbits)), ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(!qf_query(&qf, 1 + (1 << (qbits + 2*rbits)), ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		assert(qf_query(&qf, 1 + (1lu << (qbits + 3*rbits)), ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-		abort();*/
-
-    // testing insertion of duplicate items
-    /*qf_insert_ret(&qf, 1, 2, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH);
-    assert(qf_query(&qf, 1, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH) == 2);
-    assert(!qf_insert_ret(&qf, 1, 3, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-    assert(insert_and_extend(&qf, *ret_index, 1, 3, 1, ret_hash, ret_other_hash, QF_KEY_IS_HASH) == 0);
-    assert(qf_query(&qf, 1, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH) == 5);
-    
-    assert(!qf_insert_ret(&qf, 1 + (1 << (qbits + rbits)), 4, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH));
-    assert(insert_and_extend(&qf, *ret_index, 1 + (1 << (qbits + rbits)), 4, 1, ret_hash, ret_other_hash, QF_KEY_IS_HASH));
-    assert(qf_query(&qf, 1, ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH) == 5);
-    assert(qf_query(&qf, 1 + (1 << (qbits + rbits)), ret_index, ret_hash, ret_hash_len, QF_KEY_IS_HASH) == 4);
-    abort();*/
-		
 		if (0) {
 			printf("%d\n", QF_COULDNT_LOCK);
 			uint64_t q = 0, p = 0, m;
@@ -320,29 +425,14 @@ int main(int argc, char **argv)
 		//FILE *fp = fopen("timing.txt", "w");
 		// PERFORM INSERTS
 		printf("starting %lu inserts...\n", num_inserts);
-		uint64_t i, j, k = 0, l = 0;
-		for (i = 0; i < num_inserts;) {
-			//uint64_t num_occupied_slots = qf_get_num_occupied_slots(&qf);
-			/*if (qf_get_num_occupied_slots(&qf) >= 100000) {
-				fclose(fp);
-				bp2();
-			}
-			if (clock() - start_time > 500000) {
-				start_time = clock();
-				printf("%lu\t%lu\n", qf_get_num_occupied_slots(&qf), i);
-			}*/
-			/*if (qf_get_num_occupied_slots(&qf) == 97264) {
-				bp2();
-			}*/
+		uint64_t i, j, k = 0;//, l = 0;
+		for (i = 0; i < num_inserts; i++) {
 			j = rand_uniform(universe); // pick a random number
+			insert_key(&qf, htab, j, 1);
 			//j = rand_zipfian(1.01, 100000000);
 			//fgets(buffer, sizeof(buffer), shalla);
 			//j = hash_str(buffer);
-			if (j == -1804289383) {
-				bp2();
-			}
-			int ret = qf_insert_ret(&qf, j, 1, ret_index, ret_hash, ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH); // attempt to insert
-      //if (*ret_hash == 3311657) bp2();
+			/*int ret = qf_insert_ret(&qf, j, 1, ret_index, ret_hash, ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH); // attempt to insert
 			if (ret == QF_NO_SPACE) { // if filter is full, stop
 				printf("filter is full after qf_insert_ret\n");
 				break;
@@ -362,9 +452,9 @@ int main(int argc, char **argv)
 				ii.len = *ret_hash_len;
 				ilist *item_in_table = sglib_hashed_ilist_find_member(htab, &ii);
 				if (item_in_table == NULL) {
-          printf("error:\tfilter claimed to have fingerprint %lu but hashtable could not find it\n", ii.rem);
-          bp2();
-        }
+					printf("error:\tfilter claimed to have fingerprint %lu but hashtable could not find it\n", ii.rem);
+					bp2();
+				}
 				else if (item_in_table->val == j) {
 					//printf("log:\trandom insert %lu would have been duplicate, skipping\n", ii.rem);
 				}
@@ -376,10 +466,10 @@ int main(int argc, char **argv)
 						printf("filter is full after insert_and_extend\n");
 						break;
 					}
-          sglib_hashed_ilist_delete(htab, item_in_table);
-          item_in_table->rem = upd_rem;
-          item_in_table->len = ext_len;
-          sglib_hashed_ilist_add(htab, item_in_table);
+					sglib_hashed_ilist_delete(htab, item_in_table);
+					item_in_table->rem = upd_rem;
+					item_in_table->len = ext_len;
+					sglib_hashed_ilist_add(htab, item_in_table);
 
 					nn = malloc(sizeof(ilist));
 					nn->val = j;
@@ -397,23 +487,11 @@ int main(int argc, char **argv)
 				nn->rem = *ret_hash;
 				nn->len = *ret_hash_len;
 				sglib_hashed_ilist_add(htab, nn);
-				/*val_mem[val_cnt].key = val_mem[val_cnt].val = j & BITMASK(rbits);
-				val_mem[val_cnt].left = val_mem[val_cnt].right = NULL;
-				values = insertItem(values, &(val_mem[val_cnt]));
-				val_cnt++;*/
-				//l++;
 				i++;
 			}
-			/*else if (ret == -5) {
-				continue;
-			}*/
 			else {
 				printf("other error: errno %d\n", ret);
 				break;
-			}
-			/*if (get_block(&qf, 23)->offset > 0) {
-				bp2();
-				//printf(" ");
 			}*/
 		}
 		avgFill += (double)i / nslots;
@@ -422,7 +500,7 @@ int main(int argc, char **argv)
 		printf("number of slots used after inserts: %lu\n", qf_get_num_occupied_slots(&qf));
 		printf("extended %lu times\n", k);
 		avgInsTime += (clock() - start_time);
-    avgInsPer += (double)(clock() - start_time) / i;
+		avgInsPer += (double)(clock() - start_time) / i;
 		start_time = clock();
 		avgInsSlots += qf_get_num_occupied_slots(&qf);
 		

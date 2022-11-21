@@ -29,43 +29,6 @@ int bp2() {
 	return 0;
 }
 
-int snapshot(QF *qf) {
-	FILE *fp = fopen("data/snapshot.txt", "w");
-	if (fp == NULL) return 0;
-	char buffer1[128];
-	char buffer2[256];
-	bzero(buffer1, 128);
-	bzero(buffer2, 256);
-	int i, j;
-	for (i = 0; i * 64 < qf->metadata->xnslots; i++) {
-		uint64_t occupied = get_block(qf, i)->occupieds[0];
-		for (j = 0; j < 64; j++) {
-			buffer1[63 - j] = '0' + occupied % 2;
-			occupied >>= 1;
-		}
-		sprintf(buffer2, "%d\t%s\n", i, buffer1);
-		//printf("%s", buffer2);
-		fputs(buffer2, fp);
-		uint64_t runend = get_block(qf, i)->runends[0];
-		for (j = 0; j < 64; j++) {
-			buffer1[63 - j] = '0' + runend % 2;
-			runend >>= 1;
-		}
-		sprintf(buffer2, "\t%s\n", buffer1);
-		//printf("%s", buffer2);
-		fputs(buffer2, fp);
-		uint64_t extension = get_block(qf, i)->extensions[0];
-		for (j = 0; j < 64; j++) {
-			buffer1[63 - j] = '0' + extension % 2;
-			extension >>= 1;
-		}
-		sprintf(buffer2, "\t%s\n", buffer1);
-		fputs(buffer2, fp);
-	}
-	fclose(fp);
-	return 1;
-}
-
 int clear_log() {
 	FILE *fp = fopen("data/frames.txt", "w");
 	if (fp == NULL) return 0;
@@ -152,18 +115,68 @@ void csv_get(char* buffer, int col) {
 	buffer[j] = '\0';
 }
 
+int insert_key(QF *qf, ilist **htab, uint64_t key, int count) {
+        uint64_t ret_index, ret_hash, ret_other_hash;
+        int ret_hash_len;
+        int ret = qf_insert_ret(qf, key, count, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH); // attempt to insert
+        if (ret == QF_NO_SPACE) {
+                return 0;
+        }
+        else if (ret == 0) { // if a matching fingerprint is found, search hash table for original item
+                ilist ii, *nn;
+                ii.rem = ret_hash;
+                ii.len = ret_hash_len;
+                ilist *item_in_table = sglib_hashed_ilist_find_member(htab, &ii);
+                if (item_in_table == NULL) {
+                        printf("error:\tfilter claimed to have fingerprint %lu but hashtable could not find it\n", ii.rem);
+                }
+                else if (item_in_table->val == key) {
+                        insert_and_extend(qf, ret_index, key, count, key, &ret_hash, &ret_other_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
+                }
+                else if (1){
+                        int ext_len = insert_and_extend(qf, ret_index, key, count, item_in_table->val, &ret_hash, &ret_other_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
+                        if (ext_len == QF_NO_SPACE) {
+                                printf("filter is full after insert_and_extend\n");
+                                return 0;
+                        }
+                        sglib_hashed_ilist_delete(htab, item_in_table);
+                        item_in_table->rem = ret_other_hash;
+                        item_in_table->len = ext_len;
+                        sglib_hashed_ilist_add(htab, item_in_table);
+
+                        nn = malloc(sizeof(ilist));
+                        nn->val = key;
+                        nn->rem = ret_hash;
+                        nn->len = ext_len;
+                        sglib_hashed_ilist_add(htab, nn);
+                }
+        }
+        else if (ret == 1) {
+                ilist *nn = malloc(sizeof(ilist));
+                nn->val = key;
+                nn->rem = ret_hash;
+                nn->len = ret_hash_len;
+                sglib_hashed_ilist_add(htab, nn);
+        }
+        else {
+                printf("other error: errno %d\n", ret);
+                return 0;
+        }
+        return 1;
+}
+
 //ilist hash_space[1 << 20];
 //int hash_space_used = 0;
 
 int main(int argc, char **argv)
 {
-	if (argc < 7) {
-		fprintf(stderr, "Please specify \nthe log of the number of slots in the QF\nthe number of remainder bits in the QF\nthe universe size\nthe number of inserts\nthe number of queries\nthe number of trials\n");
-		// ./test 16 7 -1 $((1 << 15)) 1000000 1 0
+	if (argc < 5) {
+		fprintf(stderr, "Please specify \nthe log of the number of slots in the QF\nthe number of remainder bits in the QF\nthe number of queries\nthe number of trials\n");
+		// ./test 16 7 $((1 << 15)) 1000000 1 0
 		exit(1);
 	}
-	if (argc >= 8) {
-		srand(strtol(argv[7], NULL, 10));
+	if (argc >= 6) {
+		srand(strtol(argv[5], NULL, 10));
 		printf("running test on seed %ld\n", strtol(argv[7], NULL, 10));
 	}
 	else {
@@ -178,9 +191,9 @@ int main(int argc, char **argv)
 	uint64_t rbits = atoi(argv[2]);
 	uint64_t nhashbits = qbits + rbits;
 	uint64_t nslots = (1ULL << qbits);
-	uint64_t universe = strtoull(argv[3], NULL, 10);
-	uint64_t num_inserts = strtoull(argv[4], NULL, 10);
-	uint64_t num_queries = strtoull(argv[5], NULL, 10);
+	uint64_t universe = -1;//strtoull(argv[3], NULL, 10);
+	uint64_t num_inserts = nslots * 0.9;//strtoull(argv[3], NULL, 10);
+	uint64_t num_queries = strtoull(argv[3], NULL, 10);
 	uint64_t expected_fill = 1lu << (qbits + rbits) < num_inserts ? 1lu << (qbits + rbits) : num_inserts;
 	if (universe < expected_fill) {
 		printf("warning: universe may be too small to fill filter to completion\n");
@@ -196,13 +209,13 @@ int main(int argc, char **argv)
 	
 	double avgInsTime = 0, avgInsPer = 0, avgQryTime = 0, avgQryPer = 0, avgFP = 0, avgFill = 0, minFP = INFINITY, maxFP = 0;
 	double avgInsSlots = 0, avgQrySlots = 0;
-	int numtrials = atoi(argv[6]);
+	int numtrials = atoi(argv[4]);
 	int trials = 0;
 	for (; trials < numtrials; trials++) {
+		start_recording();
 		QF qf;
 
-		if (!qf_initfile(&qf, nslots, nhashbits, 0, QF_HASH_INVERTIBLE, 0,
-										 "mycqf.file")) {
+		if (!qf_malloc(&qf, nslots, nhashbits, 0, QF_HASH_INVERTIBLE, 0)) {
 			fprintf(stderr, "Can't allocate CQF.\n");
 			abort();
 		}
@@ -225,72 +238,25 @@ int main(int argc, char **argv)
 			printf("warning: universe may be too small to fill filter to completion\n");
 		}
 		
-		clock_t start_time, end_time;
-		start_time = clock();
+		uint64_t i, j;
+
+		uint64_t *insert_set = calloc(num_inserts, sizeof(uint64_t));
+		for (i = 0; i < num_inserts; i++) {
+			insert_set[i] = rand_uniform(-1);
+		}
 
 		// PERFORM INSERTS
 		printf("starting %lu inserts...\n", num_inserts);
-		uint64_t i, j, k = 0;
-		for (i = 0; i < num_inserts && qf_get_num_occupied_slots(&qf) <= 0.9 * (1 << qbits); i++) {
-			j = rand_uniform(universe); // pick a random number
 
-			//j = rand_zipfian(1.01, 100000000);
-			//fgets(buffer, sizeof(buffer), shalla);
-			//j = hash_str(buffer);
-			int ret = qf_insert_ret(&qf, j, 1, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH); // attempt to insert
-			if (ret == QF_NO_SPACE) { // if filter is full, stop
-				printf("filter is full after %lu inserts\n", i);
-				break;
-			}
-			else if (ret == 0) { // if a matching fingerprint is found, search hash table for original item
-				ii.rem = ret_hash;
-				ii.len = ret_hash_len;
-				ilist *item_in_table = sglib_hashed_ilist_find_member(htab, &ii);
-				if (item_in_table != NULL) {
-					int ext_len = insert_and_extend(&qf, ret_index, j, 1, item_in_table->val, &ret_hash, &ret_other_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
-					if (ext_len == QF_NO_SPACE) {
-						printf("filter is full after %lu inserts\n", i);
-						break;
-					}
-					else if (ext_len == 0) continue;
-
-					sglib_hashed_ilist_delete(htab, item_in_table);
-					item_in_table->rem = ret_other_hash;
-					item_in_table->len = ext_len;
-					sglib_hashed_ilist_add(htab, item_in_table);
-
-					nn = malloc(sizeof(ilist));
-					//nn = &hash_space[hash_space_used++];
-					nn->val = j;
-					nn->rem = ret_hash;
-					nn->len = ext_len;
-					sglib_hashed_ilist_add(htab, nn);
-					k++;
-				}
-			}
-			else if (ret == 1) {
-				nn = malloc(sizeof(ilist));
-				//nn = &hash_space[hash_space_used++];
-				nn->val = j;
-				nn->rem = ret_hash;
-				nn->len = ret_hash_len;
-				sglib_hashed_ilist_add(htab, nn);
-			}
-			else {
-				printf("other error: errno %d\n", ret);
-				break;
-			}
+		clock_t start_time, end_time;
+		start_time = clock();
+		for (i = 0; i < num_inserts; i++) {
+			if (!insert_key(&qf, htab, insert_set[i], 1)) break;
 		}
+		end_time = clock();
+		printf("time for inserts: %ld\n", end_time - start_time);
+		printf("time per insert:  %f\n", (double)(end_time - start_time) / i);
 
-		avgFill += (double)i / nslots;
-		printf("nslots = %lu\n", qf_get_nslots(&qf));
-		printf("made %lu inserts\n", i);
-		printf("number of slots used after inserts: %lu\n", qf_get_num_occupied_slots(&qf));
-		printf("extended %lu times\n", k);
-		avgInsTime += (clock() - start_time);
-		avgInsPer += (double)(clock() - start_time) / i;
-		avgInsSlots += qf_get_num_occupied_slots(&qf);
-		
 		// PERFORM QUERIES
 		printf("starting %lu queries...\n", num_queries);
 		int still_have_space = 1;
@@ -306,7 +272,6 @@ int main(int argc, char **argv)
 		}
 
 		start_time = clock();
-
 		for (i = 0; i < num_queries; i++) {
 			//j = rand_uniform(universe);
 			//j = rand_zipfian(1.5f, (1lu << 30));
@@ -345,10 +310,10 @@ int main(int argc, char **argv)
 		}
 		
 		end_time = clock();
-		printf("completed in time %ld us\n", end_time - start_time);
-		printf("performed %lu queries uniformly from a universe of %lu\n", num_queries, universe);
-		printf("number of slots used after queries: %lu\n", qf_get_num_occupied_slots(&qf));
-		printf("false positive rate: %f\n", (double)count_fp / num_queries);
+		printf("time for queries: %ld\n", end_time - start_time);
+		printf("time per query:   %f\n", (double)(end_time - start_time) / num_queries);
+
+		stop_recording();
 		
 		for(ll=sglib_hashed_ilist_it_init(&it,htab); ll!=NULL; ll=sglib_hashed_ilist_it_next(&it)) {
 			free(ll);

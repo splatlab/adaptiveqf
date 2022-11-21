@@ -14,7 +14,7 @@ else
 	ARCH=-msse4.2 -D__SSE4_2_
 endif
 
-ifdef P
+ifndef P
 	PROFILE=-pg -no-pie # for bug in gprof.
 endif
 
