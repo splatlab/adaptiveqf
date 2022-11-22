@@ -188,7 +188,7 @@ int main(int argc, char **argv)
 	qf_set_auto_resize(&qfb, false);
 	qf_set_auto_resize(&qfc, false);
 
-	clock_t start_time = clock();
+	clock_t start_time = clock(), end_time;
 
 	uint64_t target_fill = (1 << (qbits - 1)) * load_factor;
 	int i = 0;
@@ -203,9 +203,16 @@ int main(int argc, char **argv)
 		//if (!qf_insert_ret(&qfb, j, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK)) i--;
 	}
 
-	start_time = clock();
+	//start_time = clock();
 	qf_merge(&qfa, &qfb, &qfc);
-	clock_t end_time = clock();
+	//clock_t end_time = clock();
+
+	ilist *ll;
+	ilist_iter it;
+	for (ll = sglib_hashed_ilist_it_init(&it, htaba); ll != NULL; ll = sglib_hashed_ilist_it_next(&it)) {
+		sglib_hashed_ilist_add(htabb, ll);
+	}
+	end_time = clock();
 
 	snapshot(&qfc);
 
