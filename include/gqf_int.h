@@ -102,7 +102,7 @@ extern "C" {
 		uint64_t value_bits;
 		uint64_t key_remainder_bits;
 		uint64_t bits_per_slot;
-    uint64_t quotient_bits;
+		uint64_t quotient_bits;
 		__uint128_t range;
 		uint64_t nblocks;
 		uint64_t nelts;

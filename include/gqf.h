@@ -282,7 +282,7 @@ extern "C" {
 	 *   = QFI_INVALID: iterator has reached end.
 	 */
 	//int qfi_get_hash(const QFi *qfi, uint64_t *hash, uint64_t *count);
-	int qfi_get_hash(const QFi *qfi, uint64_t *rem, uint64_t *ext, uint64_t *ext_len, uint64_t *count);
+	int qfi_get_hash(const QFi *qfi, uint64_t *rem, uint64_t *ext, int *ext_len, uint64_t *count);
 
 	/* Advance to next entry.
 	 * Return value:
@@ -309,6 +309,7 @@ extern "C" {
 	/* merge two QFs into the third one. Note: merges with any existing
 		 values in qfc.  */
 	void qf_merge(const QF *qfa, const QF *qfb, QF *qfc);
+	void qf_merge_ret(const QF *qfa, const QF *qfb, QF *qfc, uint64_t **coll_hash, int **coll_len, int *col_amt);
 
 	/* merge multiple QFs into the final QF one. */
 	void qf_multi_merge(const QF *qf_arr[], int nqf, QF *qfr);
@@ -329,7 +330,7 @@ extern "C" {
 
 	void start_recording();
 	void stop_recording();
-	int record(const QF *qf, char *operation, uint64_t hash);
+	int record(const QF *qf, char *operation, uint64_t hash, uint64_t recorded_block);
 	int snapshot(const QF *qf);
 
 #ifdef __cplusplus

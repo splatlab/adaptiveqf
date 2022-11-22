@@ -239,7 +239,6 @@ void test_merge_2() {
 	qf_merge(&qfa, &qfb, &qfc);
 	
 	for (int i = 0; i < fill; i++) {
-		printf("%d\n", i);
 		assert(qf_query(&qfc, keys_a[i], &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
 		assert(qf_query(&qfc, keys_b[i], &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
 	}
@@ -300,10 +299,9 @@ int insert_key(QF *qf, ilist **htab, uint64_t key, int count) {
 		else if (item_in_table->val == key) {
 			insert_and_extend(qf, ret_index, key, count, key, &ret_hash, &ret_other_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
 		}
-		else if (1){
+		else {
 			int ext_len = insert_and_extend(qf, ret_index, key, count, item_in_table->val, &ret_hash, &ret_other_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
 			if (ext_len == QF_NO_SPACE) {
-				printf("filter is full after insert_and_extend\n");
 				return 0;
 			}
 			sglib_hashed_ilist_delete(htab, item_in_table);
@@ -344,7 +342,7 @@ int main(int argc, char **argv)
 
 	//test_deletions(6, 7);
 	start_recording();
-	test_merge_throughput();
+	test_merge_2();
 	stop_recording();
 	return 0;
 	
