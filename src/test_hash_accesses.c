@@ -171,7 +171,7 @@ int insert_key(QF *qf, ilist **htab, uint64_t key, int count) {
 int main(int argc, char **argv)
 {
 	if (argc < 5) {
-		fprintf(stderr, "Please specify \nthe log of the number of slots in the QF\nthe number of remainder bits in the Q\nthe load factor\nthe number of queries\n");
+		fprintf(stderr, "Please specify \nthe log of the number of slots in the QF\nthe number of remainder bits in the QF\nthe load factor\nthe number of queries\n");
 		// ./test 16 7 $((1 << 15)) 1000000 1 0
 		exit(1);
 	}
@@ -206,32 +206,21 @@ int main(int argc, char **argv)
 	//uint64_t *nodes = malloc(sizeof(node) * num_inserts);
 	//uint64_t *tree = nodes[0]; // simple reverse map for testing - index equals hash
 	//uint64_t* values = malloc(sizeof(uint64_t) * num_inserts);
-	uint64_t ret_index, ret_hash, ret_other_hash;
+	uint64_t ret_index, ret_hash;
 	int ret_hash_len;
 
 	sglib_hashed_ilist_init(htab);
-	ilist ii, *nn, *ll;
-	ilist_iter it;
+	ilist ii;
 
 	uint64_t i, j;
-
-	uint64_t *insert_set = calloc(num_inserts, sizeof(uint64_t));
-	for (i = 0; i < num_inserts; i++) {
-		insert_set[i] = rand_uniform(-1);
-	}
 
 	// PERFORM INSERTS
 	printf("starting %lu inserts...\n", num_inserts);
 
 	uint64_t target_fill = nslots * load_factor;
-	clock_t start_time, end_time;
-	start_time = clock();
 	for (i = 0; qf.metadata->noccupied_slots < target_fill; i++) {
-		if (!insert_key(&qf, htab, insert_set[i], 1)) break;
+		if (!insert_key(&qf, htab, rand_uniform(-1), 1)) break;
 	}
-	end_time = clock();
-	printf("time for inserts: %ld\n", end_time - start_time);
-	printf("time per insert:  %f\n", (double)(end_time - start_time) / i);
 
 	//snapshot(&qf);
 	//stop_recording();
@@ -244,20 +233,21 @@ int main(int argc, char **argv)
 		printf("filter is full; skipping query adaptations\n");
 	}
 
-	uint64_t *query_set = calloc(num_queries, sizeof(uint64_t));
-	for (i = 0; i < num_queries; i++) {
-		//query_set[i] = rand_uniform(universe);
-		query_set[i] = rand_zipfian(1.5f, 1ull << 30);
-	}
+	FILE *fp = fopen("target/hash_accesses.txt", "w");
+	fprintf(fp, "queries\taccesses\n");
+	fclose(fp);
+	fp = fopen("target/hash_accesses.txt", "a");
 
-	start_time = clock();
+	uint64_t step_size = 100000;
+	uint64_t hash_accesses = 0;
 	for (i = 0; i < num_queries; i++) {
-		j = query_set[i];
+		j = rand_zipfian(1.5f, 1ull << 30);
 
 		if (qf_query(&qf, j, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH)) {
 			ii.rem = ret_hash;
 			ii.len = ret_hash_len;
 			ilist *potential_item = sglib_hashed_ilist_find_member(htab, &ii);
+			hash_accesses++;
 			if (potential_item == NULL) bp2();
 			else if (potential_item->val != j) {
 				if (still_have_space) {
@@ -275,10 +265,14 @@ int main(int argc, char **argv)
 				}
 			}
 		}
+
+		if (i % step_size == 0) {
+			fprintf(fp, "%lu\t%lu\n", i, hash_accesses);
+		}
 	}
 
-	end_time = clock();
-	printf("time for queries: %ld\n", end_time - start_time);
-	printf("time per query:   %f\n", (double)(end_time - start_time) / num_queries);
+	fclose(fp);
+
+	printf("done\n");
 }
 

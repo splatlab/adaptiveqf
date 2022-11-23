@@ -1203,6 +1203,109 @@ void test_dataset_evolution(char* input_file_name, char* output_file_name, int n
 	free(fprates);
 }
 
+void test_hash_accesses(int qbits, int rbits, double load, uint64_t num_queries, uint64_t seed) {
+	if (seed == -1) seed = time(NULL);
+	printf("testing hash accesses on seed %lu\n", seed);
+
+	uint64_t nslots = 1ull << qbits;
+	//uint64_t xnslots = nslots + 10 * sqrt(nslots);
+
+	uint64_t num_inserts = nslots * load;
+
+	int fps = 0;  // false positives
+	int rfps = 0; // repeated false positives
+	int fns = 0;
+	int hash_accesses = 0;
+
+	TAF *filter = new_taf(nslots);
+	int nset = 1.3 * num_inserts;
+	Setnode *set = calloc(nset, sizeof(set[0]));
+
+	char str[64];
+	int len;
+	printf("starting %lu inserts\n", num_inserts);
+	for (int i = 0; i < num_inserts; i++) {
+		elt_t elt = random();
+		sprintf(str, "%lu", elt);
+		len = (int)strlen(str);
+
+		set_insert(str, len, 0, set, nset);
+		taf_insert(filter, elt);
+	}
+
+	FILE *fp = fopen("target/hash_accesses.txt", "w");
+	fprintf(fp, "queries\taccesses\n");
+	fclose(fp);
+	fp = fopen("target/hash_accesses.txt", "a");
+
+	int nseen = 1.3 * num_inserts;
+	Setnode *seen = calloc(nseen, sizeof(seen[0]));
+	printf("starting %lu queries\n", num_queries);
+	for (int i = 0; i < num_queries; i++) {
+		elt_t elt = rand_zipfian(1.5f, 1ull << 30);
+		sprintf(str, "%lu", elt);
+		len = (int)strlen(str);
+
+		int in_filter = taf_lookup(filter, elt);
+		int in_set = set_lookup(str, len, set, nset);
+
+		if (in_filter) hash_accesses++;
+		if (in_filter && !in_set) {
+			fps++;
+			if (set_lookup(str, len, seen, nseen)) {
+				rfps++;
+			} else {
+				set_insert(str, len, 0, seen, nseen);
+			}
+		} else if (!in_filter && in_set) {
+			fns++;
+			uint64_t hash = taf_hash(filter, elt);
+			size_t quot = calc_quot(filter, hash);
+			if (get_occupied(filter, quot)) {
+				int loc = rank_select(filter, quot);
+				if (loc == RANK_SELECT_EMPTY || loc == RANK_SELECT_OVERFLOW) {
+					printf("False negative (elt=%lu, 0x%lx): quot=%lu (block=%lu, slot=%lu)"
+							" was occupied but didn't have an associated runend\n",
+							elt, elt, quot, quot/64, quot%64);
+					print_taf_block(filter, quot/64);
+					exit(1);
+				} else {
+					int sels[64];
+					decode_sel(get_sel_code(filter, loc/64), sels);
+					int sel = sels[loc%64];
+					rem_t query_rem = calc_rem(filter, hash, sel);
+					rem_t stored_rem = remainder(filter, loc);
+					printf("False negative (elt=%lu, 0x%lx): quot=%lu (block=%lu, slot=%lu),"
+							"loc=%d (block=%d, slot=%d); stored rem=0x%hhx doesn't match query rem=0x%hhx\n",
+							elt, elt, quot, quot/64, quot%64, loc, loc/64, loc%64, stored_rem, query_rem);
+					print_taf_metadata(filter);
+					print_taf_block(filter, loc/64);
+					exit(1);
+				}
+			} else {
+				printf("False negative (elt=%lu, 0x%lx): quot=%lu (block=%lu, slot=%lu) wasn't occupied\n",
+						elt, elt, quot, quot/64, quot%64);
+				exit(1);
+			}
+		}
+
+		if (i % 100000 == 0) {
+			fprintf(fp, "%d\t%d\n", i, hash_accesses);
+		}
+	}
+
+	fclose(fp);
+
+	printf("Test results:\n");
+	printf("FPs: %d (%f%%), RFPs: %d (%f%%)\n",
+			fps, (double)fps/num_queries, rfps, (double)rfps/num_queries * 100);
+	printf("FNs: %d (%f%%)\n", fns, (double)fns/num_queries * 100);
+
+	taf_destroy(filter);
+	printf("Done testing %s.\n", __FUNCTION__);
+}
+
+
 void test_mixed_insert_and_query_w_repeats() {
   printf("Testing %s...\n", __FUNCTION__);
   int nslots = 1 << 14;
@@ -1429,7 +1532,7 @@ int main(int argc, char *argv[]) {
 //  test_insert_and_query_w_repeats();
   test_mixed_insert_and_query_w_repeats();*/
 
-  if (argc < 3) {
+  /*if (argc < 3) {
     printf("provide number of slots and number of inserts");
     return 0;
   }
@@ -1456,7 +1559,7 @@ int main(int argc, char *argv[]) {
   taf_destroy(filter);
 
   printf("%d\n", extra_blocks);
-  printf("finished with no issues\n");
+  printf("finished with no issues\n");*/
 
   //test_dataset_evolution("../../../aqf/AdaptiveQF/data/shalla.txt", "progress.csv", 10, 1000000, 2000000, 100);
   //test_dataset_evolution("../../../aqf/AdaptiveQF/data/20140619-140100.csv", "progress.csv", 10, 1000000, 1000000, 100);
@@ -1467,5 +1570,7 @@ int main(int argc, char *argv[]) {
   printf("insert time: %f\n", avg_insert_time / num_trials);
   printf("query time: %f\n", avg_query_time / num_trials);
   printf("fp rate: %f\n", avg_fp_rate / num_trials);*/
+
+	test_hash_accesses(24, 8, 0.9, 10000000, -1);
 }
 #endif // TEST_TAF

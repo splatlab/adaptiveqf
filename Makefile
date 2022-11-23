@@ -1,6 +1,6 @@
-TARGETS=test test_threadsafe test_pc bm test_progress test_throughput test_deletions test_merge
+TARGETS=test test_threadsafe test_pc bm test_progress test_throughput test_deletions test_merge test_hash_accesses
 
-ifdef D
+ifndef D
 	DEBUG=-g
 	OPT=
 else
@@ -14,7 +14,7 @@ else
 	ARCH=-msse4.2 -D__SSE4_2_
 endif
 
-ifdef P
+ifndef P
 	PROFILE=-pg -no-pie # for bug in gprof.
 endif
 
@@ -56,6 +56,10 @@ test_deletions:								$(OBJDIR)/test_deletions.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_
 										$(OBJDIR)/partitioned_counter.o
 
 test_merge:								$(OBJDIR)/test_merge.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/hashutil.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_hash_accesses:								$(OBJDIR)/test_hash_accesses.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 
