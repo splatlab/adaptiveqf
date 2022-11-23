@@ -37,11 +37,15 @@ int clear_log() {
 }
 
 uint64_t rand_uniform(uint64_t max) {
-  if (max <= RAND_MAX) return rand() % max;
-  uint64_t a = rand();
-  uint64_t b = rand();
-  a |= (b << 32);
-  return a % max;
+	/*if (max <= RAND_MAX) return rand() % max;
+	uint64_t a = rand();
+	uint64_t b = rand();
+	a |= (b << 32);
+	return a % max;*/
+	uint64_t a;
+	RAND_bytes((void*)(&a), sizeof(uint64_t));
+	if (max) a %= max;
+	return a;
 }
 
 double rand_normal(double mean, double sd) {
@@ -217,7 +221,7 @@ int main(int argc, char **argv)
 
 	uint64_t *insert_set = calloc(num_inserts, sizeof(uint64_t));
 	for (i = 0; i < num_inserts; i++) {
-		insert_set[i] = rand_uniform(-1);
+		insert_set[i] = rand_uniform(0);
 	}
 
 	// PERFORM INSERTS
@@ -280,5 +284,7 @@ int main(int argc, char **argv)
 	end_time = clock();
 	printf("time for queries: %ld\n", end_time - start_time);
 	printf("time per query:   %f\n", (double)(end_time - start_time) / num_queries);
+
+	snapshot(&qf);
 }
 

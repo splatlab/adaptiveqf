@@ -1571,6 +1571,6 @@ int main(int argc, char *argv[]) {
   printf("query time: %f\n", avg_query_time / num_trials);
   printf("fp rate: %f\n", avg_fp_rate / num_trials);*/
 
-	test_hash_accesses(24, 8, 0.9, 10000000, -1);
+	test_hash_accesses(23, 8, 0.9, 10000000, -1);
 }
 #endif // TEST_TAF
