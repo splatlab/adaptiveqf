@@ -1215,7 +1215,10 @@ void test_hash_accesses(int qbits, int rbits, double load, uint64_t num_queries,
 	int fps = 0;  // false positives
 	int rfps = 0; // repeated false positives
 	int fns = 0;
+	int tps = 0;
+	int tns = 0;
 	int hash_accesses = 0;
+	int negatives = 0;
 
 	TAF *filter = new_taf(nslots);
 	int nset = 1.3 * num_inserts;
@@ -1225,7 +1228,7 @@ void test_hash_accesses(int qbits, int rbits, double load, uint64_t num_queries,
 	int len;
 	printf("starting %lu inserts\n", num_inserts);
 	for (int i = 0; i < num_inserts; i++) {
-		elt_t elt = random();
+		elt_t elt = rand();
 		sprintf(str, "%lu", elt);
 		len = (int)strlen(str);
 
@@ -1234,7 +1237,7 @@ void test_hash_accesses(int qbits, int rbits, double load, uint64_t num_queries,
 	}
 
 	FILE *fp = fopen("target/hash_accesses.txt", "w");
-	fprintf(fp, "queries\taccesses\n");
+	fprintf(fp, "queries\taccesses\tfps\trfps\ttps\tnegatives\tfns\ttns\n");
 	fclose(fp);
 	fp = fopen("target/hash_accesses.txt", "a");
 
@@ -1249,9 +1252,15 @@ void test_hash_accesses(int qbits, int rbits, double load, uint64_t num_queries,
 		int in_filter = taf_lookup(filter, elt);
 		int in_set = set_lookup(str, len, set, nset);
 
-		if (in_filter) hash_accesses++;
+		if (in_filter) {
+			hash_accesses++;
+			if (in_set) tps++;
+		}
+		else {
+			negatives++;
+			if (!in_set) tns++;
+		}
 		if (in_filter && !in_set) {
-			assert(in_filter != taf_lookup(filter, elt));
 			fps++;
 			if (set_lookup(str, len, seen, nseen)) {
 				rfps++;
@@ -1291,7 +1300,7 @@ void test_hash_accesses(int qbits, int rbits, double load, uint64_t num_queries,
 		}
 
 		if (i % 100000 == 0) {
-			fprintf(fp, "%d\t%d\n", i, hash_accesses);
+			fprintf(fp, "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", i, hash_accesses, fps, rfps, tps, negatives, fns, tns);
 		}
 	}
 

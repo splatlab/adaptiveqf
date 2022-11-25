@@ -17,6 +17,7 @@ int set_insert(char* word, int length, int source, Setnode* set, int set_size) {
   if(currentNode->value == NULL) {
       currentNode->value = strdup(word);
       currentNode->sources = (1 << source);
+      //currentNode->sources = 1;
   } else {
     while(currentNode->next != NULL){
       if(strcmp(currentNode->value, word) == 0) {
