@@ -16,10 +16,10 @@ int seed;
 //d=4, b=1 (first variant)
 int num_way=4;      //# of ways (hash functions)
 int num_cells=1;  //# of slots in a rows
-int ht_size=1024; //# of rows
-int f=12; //# of fingerprint bits
+int ht_size=1 << 22; //# of rows
+int f=10; //# of fingerprint bits
 int fbhs=12;
-int skewed=0;
+int skewed=1;
 
 int max_loop=1;    //num of trials
 int load_factor=90;    //load factor
@@ -36,7 +36,7 @@ map<int64_t,int> S_map;
 map<int64_t,int> A_map;
 vector<int64_t> A_ar;
 
-uint64_t num_inserts = 1000000;
+uint64_t num_inserts = ht_size * num_way * 0.9;
 char buffer[1024];
 double fprates[1000000 / 100];
 int trials = 0;
@@ -51,6 +51,7 @@ double avg_fp = 0;
 
 //select the fingerprint function
 //                                        16-bhs  
+
 int fingerprint(int64_t key,int index,int a) {
     int s=bhs;
     int r=skewed;
@@ -280,7 +281,7 @@ int run()
 		    //fgets(buffer, sizeof(buffer), shalla);
 		    //A_ar.push_back(hash_str(buffer));
 		    //A_ar.push_back(rand_zipfian(1.5f, 1lu << 30));
-		    A_ar.push_back(rand());
+		    //A_ar.push_back(rand());
             }
 	    if(!quiet) fprintf(stderr, "\n");
 	    //fclose(caida);
@@ -295,12 +296,19 @@ int run()
             int64_t ar_size=A_ar.size();
             num_iter=npf*ar_size;
 
-	    num_iter = num_inserts;
+	    num_iter = 10000000;
+
+	    int hash_accesses = 0;
 
 	    clock_t start_queries = clock();
             //test A set
+	    FILE *accesses_fp = fopen("hash_accesses.txt", "w");
+	    fprintf(accesses_fp, "queries\taccesses\n");
+	    fclose(accesses_fp);
+	    accesses_fp = fopen("hash_accesses.txt", "a");
             for(int64_t iter=0; iter<num_iter; iter++){
-               int64_t key= A_ar[ rand() % ar_size];
+               //int64_t key= A_ar[ rand() % ar_size];
+	       uint64_t key = rand_zipfian(1.5f, 1ull << 30);
                //int64_t key= iter;
             //for (auto key: A_ar) 
                 // ACF query
@@ -312,6 +320,7 @@ int run()
                     int p = myhash<int64_t>(key, i, ht_size);
                         int ii=pFF[i][p].first;
                         if (fingerprint(key, ii, fbhs) == pFF[i][p].second) {
+				hash_accesses++;
                             flagFF = true;
                             false_i = i;
                         }
@@ -338,17 +347,18 @@ int run()
                     pFF[false_i][p].second=fingerprint(key1,pFF[false_i][p].first,fbhs);
                     num_swap++;
                 }
-		if (iter % 100 == 0) {
+		if (iter % 100000 == 0) {
 			//sprintf(buffer, "%ld,%f\n", iter, (double)tot_FF_FP / iter);
 			//fputs(buffer, progress);
-			double fpr = sample_FF_FP;
+			/*double fpr = sample_FF_FP;
 			fpr = (iter == 0 ? 0 : fpr / iter);
 			fpr += fprates[iter / 100] * trials;
 			fpr /= trials + 1;
-			fprates[iter / 100] = fpr;
-
+			fprates[iter / 100] = fpr;*/
+			fprintf(accesses_fp, "%lu\t%d\n", iter, hash_accesses);
 		}
             }
+	    fclose(accesses_fp);
 	    clock_t end_queries = clock();
 	    printf("QUERY TIME PER: %f\n", (double)(end_queries - start_queries) / 1000000);
 	    avg_query_time += end_queries - start_queries;
@@ -519,10 +529,10 @@ void init(int argc, char* argv[])
 
 
 int main(int argc, char **argv) {
-    /*init(argc,argv);
-    return run();*/
+    //init(argc,argv);
+    return run();
 
-    if (argc < 3) {
+    /*if (argc < 3) {
             printf("provide size of filter and num inserts\n");
             return 0;
     }
@@ -539,7 +549,7 @@ int main(int argc, char **argv) {
     printf("made %d inserts\n", i);
     printf("insert time: %ld\n", clock() - start_time);
     printf("insert time per: %f\n", (double)(clock() - start_time) / i);
-    return 1;
+    return 1;*/
 
     /*num_way = 4;
     num_cells = 1;

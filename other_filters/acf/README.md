@@ -1,48 +1,93 @@
-# ACF
+Cuckoo Filter
+============
 
-This is the repository for the Adaptive Cuckoo Filter simulator code presented in the 2018 Proceedings of the Twentieth Workshop on Algorithm Engineering and Experiments (ALENEX). The paper is available [here](https://epubs.siam.org/doi/pdf/10.1137/1.9781611975055.4).
-The code also includes an extension that use fingerprints with different ranges, described in and extended version of the paper that is under submission at the ACM Journal of Experimental Algorithmics (JEA).     
+Overview
+--------
+Cuckoo filter is a Bloom filter replacement for approximated set-membership queries. While Bloom filters are well-known space-efficient data structures to serve queries like "if item x is in a set?", they do not support deletion. Their variances to enable deletion (like counting Bloom filters) usually require much more space.
 
-# Getting Started
+Cuckoo ﬁlters provide the ﬂexibility to add and remove items dynamically. A cuckoo filter is based on cuckoo hashing (and therefore named as cuckoo filter).  It is essentially a cuckoo hash table storing each key's fingerprint. Cuckoo hash tables can be highly compact, thus a cuckoo filter could use less space than conventional Bloom ﬁlters, for applications that require low false positive rates (< 3%).
 
-The simulator has been developed on Ubuntu 12.04. Other distributions or versions may need different steps.
+For details about the algorithm and citations please use:
 
-# Building
+["Cuckoo Filter: Practically Better Than Bloom"](http://www.cs.cmu.edu/~binfan/papers/conext14_cuckoofilter.pdf) in proceedings of ACM CoNEXT 2014 by Bin Fan, Dave Andersen and Michael Kaminsky
 
-Run the following commands in the ACF directory to build everything:
 
+API
+--------
+A cuckoo filter supports following operations:
+
+*  `Add(item)`: insert an item to the filter
+*  `Contain(item)`: return if item is already in the filter. Note that this method may return false positive results like Bloom filters
+*  `Delete(item)`: delete the given item from the filter. Note that to use this method, it must be ensured that this item is in the filter (e.g., based on records on external storage); otherwise, a false item may be deleted.
+*  `Size()`: return the total number of items currently in the filter
+*  `SizeInBytes()`: return the filter size in bytes
+
+Here is a simple example in C++ for the basic usage of cuckoo filter.
+More examples can be found in `example/` directory.
+
+```cpp
+// Create a cuckoo filter where each item is of type size_t and
+// use 12 bits for each item, with capacity of total_items
+CuckooFilter<size_t, 12> filter(total_items);
+// Insert item 12 to this cuckoo filter
+filter.Add(12);
+// Check if previously inserted items are in the filter
+assert(filter.Contain(12) == cuckoofilter::Ok);
 ```
+
+Repository structure
+--------------------
+*  `src/`: the C++ header and implementation of cuckoo filter
+*  `example/test.cc`: an example of using cuckoo filter
+*  `benchmarks/`: Some benchmarks of speed, space used, and false positive rate
+
+
+Build
+-------
+This libray depends on openssl library. Note that on MacOS 10.12, the header
+files of openssl are not available by default. It may require to install openssl
+and pass the path to `lib` and `include` directories to gcc, for example:
+
+```bash
+$ brew install openssl
+# Replace 1.0.2j with the actual version of the openssl installed
+$ export LDFLAGS="-L/usr/local/Cellar/openssl/1.0.2j/lib"
+$ export CFLAGS="-I/usr/local/Cellar/openssl/1.0.2j/include"
+```
+
+To build the example (`example/test.cc`):
+```bash
+$ make test
+```
+
+To build the benchmarks:
+```bash
+$ cd benchmarks
 $ make
 ```
 
-# Running
-
-There are two executables for the ACF:
-
-1. acf2x4
-    This executable investigates the false positive rate achievable with the ACF for buckets with multiple cells. The code has been configured with 2 tables and 4 cells for bucket. The executable options can be retrieved running:
-
+Install
+-------
+To install the cuckoofilter library:
+```bash
+$ make install
 ```
-$ ./acf2x4 -h 
-```
-    
-
-2. acf4x1
-
-    This executable investigates the false positive rate achievable with the ACF for buckets with one cell. The code has been configured with 4 tables and 1 cell for bucket. The executable options can be retrieved running:
-
-```
-$ ./acf4x1 -h 
-```
+By default, the header files will be placed in `/usr/local/include/cuckoofilter`
+and the static library at `/usr/local/lib/cuckoofilter.a`.
 
 
-# Example
+Contributing
+------------
+Contributions via GitHub pull requests are welcome. Please keep the code style guided by
+[Google C++ style](https://google.github.io/styleguide/cppguide.html). One can use
+[clang-format](http://clang.llvm.org/docs/ClangFormat.html) with our provided
+[`.clang-format`](https://github.com/efficient/cuckoofilter/blob/master/.clang-format)
+in this repository to enforce the style.
 
-The aim of the simulator is to evaluate the false positive rate of different ACF configurations.
-The following example runs 10 iterations of an ACF with 4 tables and 1 cell for bucket loaded up to 95%. Each table contains 128 buckets, the number of fingerprint bits is 16, the number of selector bits is 2 and the skewness factor is 1.
-The simulator sends 1000 packets for each flow (in random order) and considers that the ratio A/S between the stored flows S and the active flows A is 100.
 
-```
-$ ./acf4x1 -l 10  -L 95 -m 128 -f 16 -b 2 -k 1 -n 1000 -a 100 
-```
 
+Authors
+-------
+- Bin Fan <binfan@cs.cmu.edu>
+- David G. Andersen <dga@cs.cmu.edu>
+- Michael Kaminsky <michael.e.kaminsky@intel.com>

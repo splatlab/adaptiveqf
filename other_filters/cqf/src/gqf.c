@@ -1184,7 +1184,7 @@ static inline int insert1(QF *qf, __uint128_t hash, uint8_t runtime_lock)
 {
 	int ret_distance = 0;
 	uint64_t hash_remainder           = hash & BITMASK(qf->metadata->bits_per_slot);
-	uint64_t hash_bucket_index        = hash >> qf->metadata->bits_per_slot;
+	uint64_t hash_bucket_index        = (hash % qf->metadata->range) >> qf->metadata->bits_per_slot;
 	uint64_t hash_bucket_block_offset = hash_bucket_index % QF_SLOTS_PER_BLOCK;
 
 	if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
@@ -2064,7 +2064,7 @@ uint64_t qf_query(const QF *qf, uint64_t key, uint64_t *value, uint8_t flags)
 	}
 	uint64_t hash = key;
 	uint64_t hash_remainder   = hash & BITMASK(qf->metadata->key_remainder_bits);
-	int64_t hash_bucket_index = hash >> qf->metadata->key_remainder_bits;
+	int64_t hash_bucket_index = (hash % qf->metadata->range) >> qf->metadata->key_remainder_bits;
 
 	if (!is_occupied(qf, hash_bucket_index))
 		return 0;

@@ -16,7 +16,7 @@ LIBOBJECTS = \
 HEADERS = $(wildcard src/*.h)
 ALIB = libcuckoofilter.a
 
-TEST = test
+TEST = test test_hash_accesses
 
 all: $(TEST)
 
@@ -25,6 +25,9 @@ clean:
 
 test: example/test.o $(LIBOBJECTS) 
 	$(CC) example/test.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_hash_accesses: example/test_hash_accesses.o $(LIBOBJECTS) 
+	$(CC) example/test_hash_accesses.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
 %.o: %.cc ${HEADERS} Makefile
 	$(CC) $(CFLAGS) $< -o $@

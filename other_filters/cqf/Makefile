@@ -1,4 +1,4 @@
-TARGETS=test test_threadsafe test_pc bm
+TARGETS=test test_threadsafe test_pc bm test_hash_accesses
 
 ifndef D
 	DEBUG=-g
@@ -40,6 +40,10 @@ all: $(TARGETS)
 # dependencies between programs and .o files
 
 test:								$(OBJDIR)/test.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/hashutil.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_hash_accesses:								$(OBJDIR)/test_hash_accesses.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 
