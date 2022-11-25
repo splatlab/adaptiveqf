@@ -17,8 +17,8 @@ int seed;
 int num_way=4;      //# of ways (hash functions)
 int num_cells=1;  //# of slots in a rows
 int ht_size=1 << 22; //# of rows
-int f=10; //# of fingerprint bits
-int fbhs=12;
+int f=12; //# of fingerprint bits
+int fbhs=14;
 int skewed=1;
 
 int max_loop=1;    //num of trials
@@ -184,8 +184,8 @@ int run()
             for (int64_t i = 0;  i <tot_i;  j = (++i))
             {
                 //int64_t key= rand();
-                //unsigned int key= (rand()*2^16)+rand();
-                unsigned int key=(unsigned int) dis(gen);
+                unsigned int key= ((uint64_t)rand() % (1 << 16))+(((uint64_t)rand() % (1 << 16)) << 16) + (((uint64_t)rand() % (1 << 16)) << 32) + (((uint64_t)rand() % (1 << 16)) << 48);
+                //unsigned int key=(unsigned int) dis(gen);
                 if (S_map.count(key)>0) {
                     i--;
                     continue;

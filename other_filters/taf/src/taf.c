@@ -1206,6 +1206,7 @@ void test_dataset_evolution(char* input_file_name, char* output_file_name, int n
 void test_hash_accesses(int qbits, int rbits, double load, uint64_t num_queries, uint64_t seed) {
 	if (seed == -1) seed = time(NULL);
 	printf("testing hash accesses on seed %lu\n", seed);
+	srand(seed);
 
 	uint64_t nslots = 1ull << qbits;
 	//uint64_t xnslots = nslots + 10 * sqrt(nslots);
@@ -1223,6 +1224,7 @@ void test_hash_accesses(int qbits, int rbits, double load, uint64_t num_queries,
 	TAF *filter = new_taf(nslots);
 	int nset = 1.3 * num_inserts;
 	Setnode *set = calloc(nset, sizeof(set[0]));
+	elt_t *inserts = calloc(num_inserts, sizeof(elt_t));
 
 	char str[64];
 	int len;
@@ -1232,8 +1234,9 @@ void test_hash_accesses(int qbits, int rbits, double load, uint64_t num_queries,
 		sprintf(str, "%lu", elt);
 		len = (int)strlen(str);
 
-		set_insert(str, len, 0, set, nset);
+		set_insert(str, len, i, set, nset);
 		taf_insert(filter, elt);
+		inserts[i] = elt;
 	}
 
 	FILE *fp = fopen("target/hash_accesses.txt", "w");
@@ -1254,7 +1257,12 @@ void test_hash_accesses(int qbits, int rbits, double load, uint64_t num_queries,
 
 		if (in_filter) {
 			hash_accesses++;
-			if (in_set) tps++;
+			if (in_set) {
+				tps++;
+				if (inserts[in_set - 1] != elt) {
+					printf("original insert was %lu but set was triggered by %lu\n", inserts[in_set - 1], elt);
+				}
+			}
 		}
 		else {
 			negatives++;
@@ -1581,6 +1589,6 @@ int main(int argc, char *argv[]) {
   printf("query time: %f\n", avg_query_time / num_trials);
   printf("fp rate: %f\n", avg_fp_rate / num_trials);*/
 
-	test_hash_accesses(24, 8, 0.9, 10000000, -1);
+	test_hash_accesses(20, 8, 0.9, 10000000, 0);
 }
 #endif // TEST_TAF
