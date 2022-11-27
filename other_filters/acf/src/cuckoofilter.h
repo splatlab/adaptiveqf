@@ -85,7 +85,7 @@ namespace cuckoofilter {
 					 return IndexHash((uint32_t)(index ^ (tag * 0x5bd1e995)));
 				 }
 
-				 Status AddImpl(const size_t i, const uint32_t tag);
+				 Status AddImpl(const size_t i, const uint32_t tag, const uint64_t key);
 
 				 // load factor is the fraction of occupancy
 				 double LoadFactor() const { return 1.0 * Size() / table_->SizeInTags(); }
@@ -141,19 +141,21 @@ namespace cuckoofilter {
 			}
 
 			GenerateIndexTagHash(item, &i, &tag);
-			return AddImpl(i, tag);
+			return AddImpl(i, tag, item);
 		}
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::AddImpl(const size_t i, const uint32_t tag) {
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::AddImpl(const size_t i, const uint32_t tag, const uint64_t key) {
 			size_t curindex = i;
 			uint32_t curtag = tag;
 			uint32_t oldtag;
+			uint64_t oldkey;
 
 			for (uint32_t count = 0; count < kMaxCuckooCount; count++) {
 				bool kickout = count > 0;
 				oldtag = 0;
-				if (table_->InsertTagToBucket(curindex, curtag, kickout, oldtag)) {
+				oldkey = 0;
+				if (table_->InsertTagToBucket(curindex, curtag, key, kickout, oldtag, oldkey)) {
 					num_items_++;
 					return Ok;
 				}
@@ -183,7 +185,7 @@ namespace cuckoofilter {
 			found = victim_.used && (tag == victim_.tag) &&
 				(i1 == victim_.index || i2 == victim_.index);
 
-			if (found || table_->FindTagInBuckets(i1, i2, tag)) {
+			if (found || table_->FindTagInBuckets(i1, i2, tag, NULL)) {
 				return Ok;
 			} else {
 				return NotFound;
@@ -192,7 +194,7 @@ namespace cuckoofilter {
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
 		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Adapt(const ItemType &key) {
-			/*uint64_t i1, i2, index;
+			uint64_t i1, i2, index;
 			uint64_t tag;
 
 			GenerateIndexTagHash(key, &i1, &tag);
@@ -200,7 +202,7 @@ namespace cuckoofilter {
 
 			assert(i1 == AltIndex(i2, tag));
 
-			int bucket = table_->FindTagInBuckets(i1, i2, tag);
+			int bucket = table_->FindTagInBuckets(i1, i2, tag, NULL);
 			// find which bucket it is in
 			// increment the bucket's hash selector
 			// update all of the fingerprints in the bucket according to the new hash selector
@@ -208,9 +210,13 @@ namespace cuckoofilter {
 			if (!bucket) return NotFound;
 			index = (bucket == 1 ? i1 : i2);
 
-			for (int j = 0; j < 4; j++) {
-				table_->WriteTag(index, j, tag);
-			}*/
+			hash_sels[index] = (hash_sels[index] + 1) & 0b1111;
+			uint64_t *keys = table_->GetKeys(index);
+			for (size_t j = 0; j < bits_per_item; j++) {
+				uint64_t oldkey = keys[j];
+				uint64_t newtag = (hash_fcns[(int)hash_sels[index]])(oldkey);
+				table_->UpdateTag(index, j, newtag);
+			}
 
 			return Ok;
 		}

@@ -126,37 +126,82 @@ class MirroredTable {
     keys[i][j] = key;
   }
 
+  inline void UpdateTag(const size_t i, const size_t j, const uint32_t t) {
+	  char *p = buckets_[i].bits_;
+	  uint32_t tag = t & kTagMask;
+	  /* following code only works for little-endian */
+	  if (bits_per_tag == 2) {
+		  *((uint8_t *)p) |= tag << (2 * j);
+	  } else if (bits_per_tag == 4) {
+		  p += (j >> 1);
+		  if ((j & 1) == 0) {
+			  *((uint8_t *)p) &= 0xf0;
+			  *((uint8_t *)p) |= tag;
+		  } else {
+			  *((uint8_t *)p) &= 0x0f;
+			  *((uint8_t *)p) |= (tag << 4);
+		  }
+	  } else if (bits_per_tag == 8) {
+		  ((uint8_t *)p)[j] = tag;
+	  } else if (bits_per_tag == 12) {
+		  p += (j + (j >> 1));
+		  if ((j & 1) == 0) {
+			  ((uint16_t *)p)[0] &= 0xf000;
+			  ((uint16_t *)p)[0] |= tag;
+		  } else {
+			  ((uint16_t *)p)[0] &= 0x000f;
+			  ((uint16_t *)p)[0] |= (tag << 4);
+		  }
+	  } else if (bits_per_tag == 16) {
+		  ((uint16_t *)p)[j] = tag;
+	  } else if (bits_per_tag == 32) {
+		  ((uint32_t *)p)[j] = tag;
+	  }
+  }
+
   inline int FindTagInBuckets(const size_t i1, const size_t i2,
 		  const uint32_t tag, uint64_t *key) const {
-	  const char *p1 = buckets_[i1].bits_;
-	  const char *p2 = buckets_[i2].bits_;
-
-	  uint64_t v1 = *((uint64_t *)p1);
-	  uint64_t v2 = *((uint64_t *)p2);
-
-	  // caution: unaligned access & assuming little endian
-	  if (bits_per_tag == 4 && kTagsPerBucket == 4) {
-		  if (hasvalue4(v1, tag)) {
-			  if (key) *key = keys[i1][];
-			  return 1;
-		  }
-		  if (hasvalue4(v2, tag)) return 2;
-	  } else if (bits_per_tag == 8 && kTagsPerBucket == 4) {
-		  if (hasvalue8(v1, tag)) return 1;
-		  if (hasvalue8(v2, tag)) return 2;
-	  } else if (bits_per_tag == 12 && kTagsPerBucket == 4) {
-		  if (hasvalue12(v1, tag)) return 1;
-		  if (hasvalue12(v2, tag)) return 2;
-	  } else if (bits_per_tag == 16 && kTagsPerBucket == 4) {
-		  if (hasvalue16(v1, tag)) return 1;
-		  if (hasvalue16(v2, tag)) return 2;
-	  } else {
+	  if (key) {
 		  for (size_t j = 0; j < kTagsPerBucket; j++) {
-			  if (ReadTag(i1, j) == tag) return 1;
-			  if (ReadTag(i2, j) == tag) return 2;
+			  if (ReadTag(i1, j) == tag) {
+				  *key = keys[i1][j];
+				  return 1;
+			  }
+			  if (ReadTag(i2, j) == tag) {
+				  *key = keys[i2][j];
+				  return 2;
+			  }
 		  }
+		  return 0;
 	  }
-	  return 0;
+	  else {
+		  const char *p1 = buckets_[i1].bits_;
+		  const char *p2 = buckets_[i2].bits_;
+
+		  uint64_t v1 = *((uint64_t *)p1);
+		  uint64_t v2 = *((uint64_t *)p2);
+
+		  // caution: unaligned access & assuming little endian
+		  if (bits_per_tag == 4 && kTagsPerBucket == 4) {
+			  if (hasvalue4(v1, tag)) return 1;
+			  if (hasvalue4(v2, tag)) return 2;
+		  } else if (bits_per_tag == 8 && kTagsPerBucket == 4) {
+			  if (hasvalue8(v1, tag)) return 1;
+			  if (hasvalue8(v2, tag)) return 2;
+		  } else if (bits_per_tag == 12 && kTagsPerBucket == 4) {
+			  if (hasvalue12(v1, tag)) return 1;
+			  if (hasvalue12(v2, tag)) return 2;
+		  } else if (bits_per_tag == 16 && kTagsPerBucket == 4) {
+			  if (hasvalue16(v1, tag)) return 1;
+			  if (hasvalue16(v2, tag)) return 2;
+		  } else {
+			  for (size_t j = 0; j < kTagsPerBucket; j++) {
+				  if (ReadTag(i1, j) == tag) return 1;
+				  if (ReadTag(i2, j) == tag) return 2;
+			  }
+		  }
+		  return 0;
+	  }
   }
 
   inline bool FindTagInBucket(const size_t i, const uint32_t tag) const {
@@ -191,25 +236,26 @@ class MirroredTable {
     for (size_t j = 0; j < kTagsPerBucket; j++) {
       if (ReadTag(i, j) == tag) {
         assert(FindTagInBucket(i, tag) == true);
-        WriteTag(i, j, 0);
+        WriteTag(i, j, 0, 0);
         return true;
       }
     }
     return false;
   }
 
-  inline bool InsertTagToBucket(const size_t i, const uint32_t tag,
-                                const bool kickout, uint32_t &oldtag) {
+  inline bool InsertTagToBucket(const size_t i, const uint32_t tag, const uint64_t key,
+                                const bool kickout, uint32_t &oldtag, uint64_t &oldkey) {
     for (size_t j = 0; j < kTagsPerBucket; j++) {
       if (ReadTag(i, j) == 0) {
-        WriteTag(i, j, tag);
+        WriteTag(i, j, tag, key);
         return true;
       }
     }
     if (kickout) {
       size_t r = rand() % kTagsPerBucket;
       oldtag = ReadTag(i, r);
-      WriteTag(i, r, tag);
+      oldkey = keys[i][r];
+      WriteTag(i, r, tag, key);
     }
     return false;
   }
@@ -222,6 +268,10 @@ class MirroredTable {
       }
     }
     return num;
+  }
+
+  inline uint64_t *GetKeys(const size_t i) const {
+	  return keys[i];
   }
 };
 }  // namespace cuckoofilter

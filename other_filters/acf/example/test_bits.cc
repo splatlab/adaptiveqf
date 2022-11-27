@@ -42,8 +42,10 @@ double rand_zipfian(double s, double max) {
 int main(int argc, char **argv) {
 	assert(argc >= 3);
 	char buffer[65];
-	//ulltobin(buffer, haszero16(0x0000000000000001ULL));
+	printf("%llx\t%llx\n", strtoull(argv[1], NULL, 2), strtoull(argv[2], NULL, 2));
 	ulltobin(buffer, hasvalue16(strtoull(argv[1], NULL, 2), strtoull(argv[2], NULL, 2)));
+	printf("%s\n", buffer);
+	ulltobin(buffer, hasvalue4(0x0000000000000000ULL, 1));
 	printf("%s\n", buffer);
 
 	return 0;
