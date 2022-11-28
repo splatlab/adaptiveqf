@@ -29,6 +29,10 @@ class HashUtil {
   static uint32_t MurmurHash(const void *buf, size_t length, uint32_t seed = 0);
   static uint32_t MurmurHash(const std::string &s, uint32_t seed = 0);
 
+  // MurmurHash64
+  static uint64_t MurmurHash64(const void *buf, size_t length, uint64_t seed = 0);
+  static uint64_t MurmurHash64(const uint64_t key, uint64_t seed = 0);
+
   // SuperFastHash
   static uint32_t SuperFastHash(const void *buf, size_t len);
   static uint32_t SuperFastHash(const std::string &s);
@@ -61,9 +65,25 @@ class TwoIndependentMultiplyShift {
     }
   }
 
-  uint64_t operator()(uint64_t key) const {
+  uint64_t operator()(const uint64_t key) const {
     return (add_ + multiply_ * static_cast<decltype(multiply_)>(key)) >> 64;
   }
+};
+
+class Murmur64Hasher {
+	uint64_t seed;
+
+	public:
+	Murmur64Hasher() {
+		::std::random_device random;
+		seed = random();
+		seed <<= 32;
+		seed |= random();
+	}
+
+	uint64_t operator()(const uint64_t key) const {
+		return HashUtil::MurmurHash64(key, seed);
+	}
 };
 
 // See Patrascu and Thorup's "The Power of Simple Tabulation Hashing"

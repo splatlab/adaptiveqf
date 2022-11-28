@@ -137,6 +137,26 @@ int set_query(set_node *set, int set_len, uint64_t key) {
 	}
 }
 
+uint64_t hash_str(char *str) {
+        uint64_t hash = 5381;
+        int c;
+        while ((c = *str++)) {
+                hash = ((hash << 5) + hash) + c;
+        }
+        return hash;
+}
+
+void csv_get_col(char* buffer, int col) {
+        int i, j;
+        for (i = 0; buffer[i] != '\0' && col > 0; i++) {
+                if (buffer[i] == ',') col--;
+        }
+        for (j = 0; buffer[i + j] != '\0' && buffer[i + j] != ','; j++) {
+                buffer[j] = buffer[i + j];
+        }
+        buffer[j] = '\0';
+}
+
 int main(int argc, char **argv) {
 	//srand(time(NULL));
 	uint64_t seed = 1669602171;
@@ -145,7 +165,7 @@ int main(int argc, char **argv) {
 	srand(seed);
 	zipfian_seed = rand();
 
-	size_t nslots = 1 << 24;
+	size_t nslots = 1 << 20;
 	size_t total_inserts = nslots * 0.9;
 
 	// Create a cuckoo filter where each item is of type size_t and
@@ -189,7 +209,7 @@ int main(int argc, char **argv) {
 	}*/
 
 	// Check non-existing items, a few false positives expected
-	size_t total_queries = 10000000;
+	size_t total_queries = 2900000;
 	size_t fp_queries = 0;
 	size_t p_queries = 0;
 	/*for (size_t i = total_items; i < 2 * total_items; i++) {
@@ -199,17 +219,25 @@ int main(int argc, char **argv) {
 	  total_queries++;
 	  }*/
 
+	char buffer[1024];
+	FILE *shalla = fopen("../../data/shalla.txt", "r");
+
 	printf("generating queries\n");
 	uint64_t *queries = new uint64_t[total_queries];
 	for (size_t i = 0; i < total_queries; i++) {
-		queries[i] = rand_zipfian(1.5f, 1ull << 30);
+		fgets(buffer, 1024, shalla);
+		queries[i] = hash_str(buffer);
+		//queries[i] = rand_zipfian(1.5f, 1ull << 30);
 		//queries[i] = rand_uniform();
 	}
+
+	FILE *output = fopen("fprate.csv", "w");
+	fprintf(output, "queries\tfprate\n");
 
 	printf("performing queries\n");
 	start_time = clock();
 	for (size_t i = 0; i < total_queries; i++) {
-		uint64_t key = queries[i];
+		uint64_t key = queries[rand() % total_queries];
 		//uint64_t key = query_set[i];
 		if (filter.Contain(key) == cuckoofilter::Ok) {
 			p_queries++;
@@ -218,23 +246,24 @@ int main(int argc, char **argv) {
 				if (filter.Adapt(key) != cuckoofilter::Ok) printf("error: adapt failed to find previously queried item\n");
 			}
 		}
-	}
-	end_time = clock();
-	printf("time per query: %f\n", (double)(end_time - start_time) / total_queries);
-	printf("query throughput: %f\n", 1000000. * total_queries / (end_time - start_time));
 
-	printf("starting micro test\n");
-	start_time = clock();
-	for (size_t i = 0; i < total_queries; i++) {
-		uint64_t key = queries[i];
-		if (filter.Contain(key) == cuckoofilter::Ok) {
-			p_queries++;
+		if (i % 20000 == 0) {
+			printf("%lu\n", i);
+			double temp_fp = 0;
+			for (size_t j = 0; j < 1000000; j++) {
+				if (filter.Contain(key) == cuckoofilter::Ok) {
+					if (!set_query(set, set_len, key)) {
+						temp_fp++;
+					}
+				}
+			}
+			fprintf(output, "%lu\t%f\n", i, temp_fp / 1000000);
 		}
 	}
 	end_time = clock();
+	fclose(output);
 	printf("time per query: %f\n", (double)(end_time - start_time) / total_queries);
 	printf("query throughput: %f\n", 1000000. * total_queries / (end_time - start_time));
-
 
 	// Output the measured false positive rate
 	std::cout << "false positive rate: "

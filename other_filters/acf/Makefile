@@ -3,8 +3,8 @@ AR = ar
 PREFIX=/usr/local
 
 # Uncomment one of the following to switch between debug and opt mode
-#OPT = -O3 -DNDEBUG
-OPT = -g -ggdb
+OPT = -DNDEBUG
+#OPT = -g -ggdb
 
 CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ $(OPT)
 
@@ -16,7 +16,7 @@ LIBOBJECTS = \
 HEADERS = $(wildcard src/*.h)
 ALIB = libcuckoofilter.a
 
-TEST = test test_bits
+TEST = test test_fp test_bits test_raw
 
 all: $(TEST)
 
@@ -26,8 +26,14 @@ clean:
 test: example/test.o $(LIBOBJECTS) 
 	$(CC) example/test.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
+test_fp: example/test_fp.o $(LIBOBJECTS) 
+	$(CC) example/test_fp.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
 test_bits: example/test_bits.o $(LIBOBJECTS)
 	$(CC) example/test_bits.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_micro: example/test_micro.o $(LIBOBJECTS)
+	$(CC) example/test_micro.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
 %.o: %.cc ${HEADERS} Makefile
 	$(CC) $(CFLAGS) $< -o $@

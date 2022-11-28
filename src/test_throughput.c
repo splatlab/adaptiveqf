@@ -210,12 +210,11 @@ int main(int argc, char **argv)
 	//uint64_t *nodes = malloc(sizeof(node) * num_inserts);
 	//uint64_t *tree = nodes[0]; // simple reverse map for testing - index equals hash
 	//uint64_t* values = malloc(sizeof(uint64_t) * num_inserts);
-	uint64_t ret_index, ret_hash, ret_other_hash;
+	uint64_t ret_index, ret_hash;
 	int ret_hash_len;
 
 	sglib_hashed_ilist_init(htab);
-	ilist ii, *nn, *ll;
-	ilist_iter it;
+	ilist ii;
 
 	uint64_t i, j;
 
@@ -284,6 +283,7 @@ int main(int argc, char **argv)
 	end_time = clock();
 	printf("time for queries: %ld\n", end_time - start_time);
 	printf("time per query:   %f\n", (double)(end_time - start_time) / num_queries);
+	printf("query throughput: %f\n", 1000000. * num_queries / (end_time - start_time));
 
 	snapshot(&qf);
 }

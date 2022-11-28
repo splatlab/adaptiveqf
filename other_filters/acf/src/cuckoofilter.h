@@ -50,42 +50,48 @@ namespace cuckoofilter {
 				 VictimCache victim_;
 
 				 HashFamily hasher_;
+				 HashFamily alt_hasher_;
 				 char *hash_sels;
 				 HashFamily *hash_fcns;
 
-				 inline uint64_t GetSelectedHash(size_t index, ItemType item) const {
-					 const size_t hash_sel = (size_t)hash_sels[index];
-					 return (hash_fcns[hash_sel])(item);
+				 inline size_t GenerateIndexHash(const ItemType item) const {
+					 size_t index = hasher_(item);
+					 return index % table_->NumBuckets();
+				 }
+				 
+				 inline size_t GenerateAltIndexHash(const ItemType item, const uint64_t first_index) const {
+					 size_t index = alt_hasher_(item) % table_->NumBuckets();
+					 if (index == first_index) index = (index ? index - 1 : table_->NumBuckets() - 1);
+					 return index;
 				 }
 
-				 inline size_t IndexHash(uint64_t hv) const {
-					 // table_->num_buckets is always a power of two, so modulo can be replaced
-					 // with
-					 // bitwise-and:
-					 return hv & (table_->NumBuckets() - 1);
+				 inline uint64_t GenerateTagHash(const ItemType item, const size_t index) const {
+					 size_t hash_sel;
+					 if (index & 1) hash_sel = ((size_t)hash_sels[index / 2]) >> 4;
+					 else hash_sel = ((size_t)hash_sels[index / 2]) & ((1 << 4) - 1);
+					 uint64_t tag = (hash_fcns[hash_sel])(item);
+					 tag &= ((1ULL << bits_per_item) - 1);
+					 return tag + (tag == 0);
 				 }
 
-				 inline uint64_t TagHash(uint64_t hv) const {
-					 uint64_t tag;
-					 tag = hv & ((1ULL << bits_per_item) - 1);
-					 tag += (tag == 0);
-					 return tag;
+				 inline size_t AltIndexFromKey(const size_t index, const uint64_t key) const {
+					 size_t alt_index = alt_hasher_(key) % table_->NumBuckets();
+					 if (alt_index == index) {
+						 alt_index = hasher_(key) % table_->NumBuckets();
+						 if (alt_index == index) return (alt_index ? alt_index - 1 : table_->NumBuckets() - 1);
+					 }
+					 return alt_index;
 				 }
 
-				 inline void GenerateIndexTagHash(ItemType item, size_t *index, uint64_t *tag) const {
-					 *index = IndexHash(hasher_(item));
-					 *tag = TagHash(GetSelectedHash(*index, item));
+				 inline void IncrHashSel(const size_t index) const {
+					 size_t n0 = ((size_t)hash_sels[index / 2]) & ((1 << 4) - 1);
+					 size_t n1 = ((size_t)hash_sels[index / 2]) >> 4;
+					 if (index & 1) n1 = (n1 + 1) & ((1 << 4) - 1);
+					 else n0 = (n0 + 1) & ((1 << 4) - 1);
+					 hash_sels[index / 2] = (char)(n0 | (n1 << 4));
 				 }
 
-				 inline size_t AltIndex(const size_t index, const uint32_t tag) const {
-					 // NOTE(binfan): originally we use:
-					 // index ^ HashUtil::BobHash((const void*) (&tag), 4)) & table_->INDEXMASK;
-					 // now doing a quick-n-dirty way:
-					 // 0x5bd1e995 is the hash constant from MurmurHash2
-					 return IndexHash((uint32_t)(index ^ (tag * 0x5bd1e995)));
-				 }
-
-				 Status AddImpl(const size_t i, const uint32_t tag, const uint64_t key);
+				 Status AddImpl(const uint64_t key);
 
 				 // load factor is the fraction of occupancy
 				 double LoadFactor() const { return 1.0 * Size() / table_->SizeInTags(); }
@@ -102,23 +108,23 @@ namespace cuckoofilter {
 					 }
 					 victim_.used = false;
 					 table_ = new TableType<bits_per_item>(num_buckets);
-					 hash_sels = new char[num_buckets];
+					 hash_sels = new char[num_buckets / 2];
 					 hash_fcns = new HashFamily[num_buckets];
 				 }
 
 				 ~CuckooFilter() { delete table_; }
 
 				 // Add an item to the filter.
-				 Status Add(const ItemType &item);
+				 Status Add(const ItemType item);
 
 				 // Report if the item is inserted, with false positive rate.
-				 Status Contain(const ItemType &item) const;
+				 Status Contain(const ItemType item) const;
 
 
-				 Status Adapt(const ItemType &item);
+				 Status Adapt(const ItemType item) const;
 
 				 // Delete an key from the filter
-				 Status Delete(const ItemType &item);
+				 Status Delete(const ItemType item);
 
 				 /* methods for providing stats  */
 				 // summary infomation
@@ -132,37 +138,28 @@ namespace cuckoofilter {
 			 };
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Add(const ItemType &item) {
-			size_t i;
-			uint64_t tag;
-
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Add(const ItemType item) {
 			if (victim_.used) {
 				return NotEnoughSpace;
 			}
 
-			GenerateIndexTagHash(item, &i, &tag);
-			return AddImpl(i, tag, item);
+			return AddImpl(item);
 		}
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::AddImpl(const size_t i, const uint32_t tag, const uint64_t key) {
-			size_t curindex = i;
-			uint32_t curtag = tag;
-			uint32_t oldtag;
-			uint64_t oldkey;
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::AddImpl(const uint64_t key) {
+			size_t curindex = GenerateIndexHash(key);
+			uint64_t curkey = key;
+			uint64_t curtag = GenerateTagHash(curkey, curindex);
 
 			for (uint32_t count = 0; count < kMaxCuckooCount; count++) {
 				bool kickout = count > 0;
-				oldtag = 0;
-				oldkey = 0;
-				if (table_->InsertTagToBucket(curindex, curtag, key, kickout, oldtag, oldkey)) {
+				if (table_->InsertTagToBucket(curindex, curtag, curkey, kickout)) {
 					num_items_++;
 					return Ok;
 				}
-				if (kickout) {
-					curtag = oldtag;
-				}
-				curindex = AltIndex(curindex, curtag);
+				curindex = AltIndexFromKey(curindex, key);
+				curtag = GenerateTagHash(curkey, curindex);
 			}
 
 			victim_.index = curindex;
@@ -172,20 +169,50 @@ namespace cuckoofilter {
 		}
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Contain(const ItemType &key) const {
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Adapt(const ItemType key) const {
+			uint64_t i1, i2, index;
+			uint64_t tag1, tag2;
+
+			i1 = GenerateIndexHash(key);
+			tag1 = GenerateTagHash(key, i1);
+			i2 = GenerateAltIndexHash(key, i1);
+			tag2 = GenerateTagHash(key, i2);
+			if (victim_.used && ((tag1 == victim_.tag && i1 == victim_.index) || (tag2 == victim_.tag && i2 == victim_.index))) return Ok;
+
+			if (table_->FindTagInBucket(i1, tag1)) index = i1;
+			else {
+				assert(table_->FindTagInBucket(i2, tag2));
+				index = i2;
+			}
+			
+			IncrHashSel(index);
+			uint64_t keys[4];
+			table_->GetKeys(index, keys);
+			for (size_t j = 0; j < 4; j++) {
+				if (keys[j] == 0) break;
+				table_->UpdateTag(index, j, GenerateTagHash(keys[j], index));
+			}
+
+			return Ok;
+		}
+
+	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Contain(const ItemType key) const {
 			bool found = false;
 			uint64_t i1, i2;
-			uint64_t tag;
+			uint64_t tag1, tag2;
 
-			GenerateIndexTagHash(key, &i1, &tag);
-			i2 = AltIndex(i1, tag);
+			i1 = GenerateIndexHash(key);
+			tag1 = GenerateTagHash(key, i1);
+			i2 = GenerateAltIndexHash(key, i1);
+			tag2 = GenerateTagHash(key, i2);
 
-			assert(i1 == AltIndex(i2, tag));
+			assert(i1 == AltIndexFromKey(i2, key));
 
-			found = victim_.used && (tag == victim_.tag) &&
-				(i1 == victim_.index || i2 == victim_.index);
+			found = victim_.used && ((tag1 == victim_.tag && i1 == victim_.index) ||
+				(tag2 == victim_.tag && i2 == victim_.index));
 
-			if (found || table_->FindTagInBuckets(i1, i2, tag, NULL)) {
+			if (found || table_->FindTagInBucket(i1, tag1) || table_->FindTagInBucket(i2, tag2)) {
 				return Ok;
 			} else {
 				return NotFound;
@@ -193,38 +220,9 @@ namespace cuckoofilter {
 		}
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Adapt(const ItemType &key) {
-			uint64_t i1, i2, index;
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Delete(const ItemType key) {
+			/*size_t i1, i2;
 			uint64_t tag;
-
-			GenerateIndexTagHash(key, &i1, &tag);
-			i2 = AltIndex(i1, tag);
-
-			assert(i1 == AltIndex(i2, tag));
-
-			int bucket = table_->FindTagInBuckets(i1, i2, tag, NULL);
-			// find which bucket it is in
-			// increment the bucket's hash selector
-			// update all of the fingerprints in the bucket according to the new hash selector
-			
-			if (!bucket) return NotFound;
-			index = (bucket == 1 ? i1 : i2);
-
-			hash_sels[index] = (hash_sels[index] + 1) & 0b1111;
-			uint64_t *keys = table_->GetKeys(index);
-			for (size_t j = 0; j < bits_per_item; j++) {
-				uint64_t oldkey = keys[j];
-				uint64_t newtag = (hash_fcns[(int)hash_sels[index]])(oldkey);
-				table_->UpdateTag(index, j, newtag);
-			}
-
-			return Ok;
-		}
-
-	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Delete(const ItemType &key) {
-			size_t i1, i2;
-			uint32_t tag;
 
 			GenerateIndexTagHash(key, &i1, &tag);
 			i2 = AltIndex(i1, tag);
@@ -250,7 +248,8 @@ TryEliminateVictim:
 				uint32_t tag = victim_.tag;
 				AddImpl(i, tag);
 			}
-			return Ok;
+			return Ok;*/
+			return NotFound;
 		}
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>

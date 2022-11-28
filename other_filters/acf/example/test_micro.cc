@@ -9,7 +9,35 @@
 
 using cuckoofilter::CuckooFilter;
 
-uint64_t MurmurHash64A (const void *key, int len, unsigned int seed) {
+uint64_t rand_uniform() {
+	uint64_t a = rand();
+	a += ((uint64_t)RAND_MAX + 1) * rand();
+	return a;
+}
+
+double rand_zipfian(double s, double max) {
+        double p = (double)rand() / RAND_MAX;
+
+        double pD = p * (12 * (pow(max, -s + 1) - 1) / (1 - s) + 6 + 6 * pow(max, -s) + s - s * pow(max, -s + 1));
+        double x = max / 2;
+        while (true) {
+                double m = pow(x, -s - 2);
+                double mx = m * x;
+                double mxx = mx * x;
+                double mxxx = mxx * x;
+
+                double b = 12 * (mxxx - 1) / (1 - s) + 6 + 6 * mxx + s - (s * mx) - pD;
+                double c = 12 * mxx - (6 * s * mx) + (m * s * (s + 1));
+                double newx = x - b / c > 1 ? x - b / c : 1;
+                if (abs(newx - x) <= 0.01) { // this is the tolerance for approximation
+                        return newx;
+                }
+                x = newx;
+        }
+}
+
+uint64_t MurmurHash64A ( const void * key, int len, unsigned int seed )
+{
         const uint64_t m = 0xc6a4a7935bd1e995;
         const int r = 47;
 
@@ -51,36 +79,6 @@ uint64_t MurmurHash64A (const void *key, int len, unsigned int seed) {
         return h;
 }
 
-uint64_t rand_uniform() {
-	uint64_t a = rand();
-	a += ((uint64_t)RAND_MAX + 1) * rand();
-	return a;
-}
-
-int zipfian_seed = 0;
-double rand_zipfian(double s, double max) {
-        double p = (double)rand() / RAND_MAX;
-
-        double pD = p * (12 * (pow(max, -s + 1) - 1) / (1 - s) + 6 + 6 * pow(max, -s) + s - s * pow(max, -s + 1));
-        double x = max / 2;
-        while (true) {
-                double m = pow(x, -s - 2);
-                double mx = m * x;
-                double mxx = mx * x;
-                double mxxx = mxx * x;
-
-                double b = 12 * (mxxx - 1) / (1 - s) + 6 + 6 * mxx + s - (s * mx) - pD;
-                double c = 12 * mxx - (6 * s * mx) + (m * s * (s + 1));
-                double newx = x - b / c > 1 ? x - b / c : 1;
-                if (abs(newx - x) <= 0.01) { // this is the tolerance for approximation
-			uint64_t result = newx;
-                        return MurmurHash64A((void*)(&result), sizeof(result), zipfian_seed);
-                }
-                x = newx;
-        }
-}
-
-
 #define HASH_SET_SEED 26571997
 
 //linked list node for hashing with chaining
@@ -90,7 +88,6 @@ struct _set_node {
 } typedef set_node;
 
 int set_insert(set_node *set, int set_len, uint64_t key) {
-	if (!key) key++;
 	uint64_t hash = MurmurHash64A((void*)(&key), sizeof(key), HASH_SET_SEED);
 	set_node *ptr = &set[hash % set_len];
 	if (!ptr->value) {
@@ -117,7 +114,6 @@ int set_insert(set_node *set, int set_len, uint64_t key) {
 //look up word in the set
 //returns sources if it is found; returns 0 otherwise
 int set_query(set_node *set, int set_len, uint64_t key) {
-	if (!key) key++;
 	uint64_t hash = MurmurHash64A((void*)(&key), sizeof(key), HASH_SET_SEED);
 	set_node *ptr = &set[hash % set_len];
 	if (!ptr->value) {
@@ -130,23 +126,71 @@ int set_query(set_node *set, int set_len, uint64_t key) {
 			ptr = ptr->next;
 		}
 		if (ptr->value == key){
-			return 1;
-		} else {
 			return 0;
+		} else {
+			return 1;
 		}
 	}
 }
 
 int main(int argc, char **argv) {
-	//srand(time(NULL));
-	uint64_t seed = 1669602171;
-	seed = time(NULL);
-	printf("running on seed %lu\n", seed);
-	srand(seed);
-	zipfian_seed = rand();
-
 	size_t nslots = 1 << 24;
 	size_t total_inserts = nslots * 0.9;
+	size_t total_queries = 10000000;
+
+	if (argc > 1) {
+		FILE *fp = fopen(argv[1], "r");
+		fscanf(fp, "%lu\n%lu\n", &nslots, &total_queries);
+		total_inserts = nslots * 0.9;
+
+		CuckooFilter<size_t, 12> filter(total_inserts);
+		
+		uint64_t *insert_set = new uint64_t[total_inserts];
+		uint64_t *query_set = new uint64_t[total_queries];
+		char *oper_set = new char[total_queries];
+
+		for (size_t i = 0; i < total_inserts; i++) {
+			fscanf(fp, "%lu\n", &insert_set[i]);
+		}
+		for (size_t i = 0; i < total_queries; i++) {
+			fscanf(fp, "%c\t%lu\n", &oper_set[i], &query_set[i]);
+		}
+
+		uint64_t num_inserts = 0;
+		clock_t start_time = clock(), end_time;
+		for (size_t i = 0; i < total_inserts; i++, num_inserts++) {
+			if (filter.Add(insert_set[i]) == cuckoofilter::Ok);
+			/*if (num_inserts % 1000000 == 0) {
+				printf("%lu\n", num_inserts);
+			}*/
+		}
+		end_time = clock();
+		printf("total insert time: %ld\n", end_time - start_time);
+		printf("total num inserts: %lu\n", num_inserts);
+		printf("insert throughput: %f\n\n", 1000000. * num_inserts / (end_time - start_time));
+
+		uint64_t queries_made = 0;
+		start_time = clock();
+		for (size_t i = 0; i < total_queries; i++) {
+			filter.Contain(query_set[i]);
+			if (1 || oper_set[i] == '0') {
+				if (filter.Contain(query_set[i]) != cuckoofilter::Ok);
+			}
+			else if (oper_set[i] == '1') {
+				//if (filter.Contain(query_set[i]) != cuckoofilter::Ok) printf("error: unexpected query result\n");
+				//filter.Adapt(filter.Adapt(query_set[i]));
+			}
+			queries_made++;
+		}
+		end_time = clock();
+		printf("total query time:  %ld\n", end_time - start_time);
+		printf("total num queries: %lu\n", total_queries);
+		printf("query throughput:  %f\n", 1000000. * total_queries / (end_time - start_time));
+		assert(queries_made == total_queries);
+
+		fclose(fp);
+		return 0;
+	}
 
 	// Create a cuckoo filter where each item is of type size_t and
 	// use 12 bits for each item:
@@ -158,29 +202,21 @@ int main(int argc, char **argv) {
 	CuckooFilter<size_t, 12> filter(total_inserts);
 	int set_len = total_inserts * 1.3;
 	set_node *set = new set_node[set_len];
-	for (int i = 0; i < set_len; i++) {
-		set[i].value = 0;
-		set[i].next = NULL;
-	}
 
-	uint64_t *inserts = new uint64_t[total_inserts];
-	for (size_t i = 0; i < total_inserts; i++) {
-		inserts[i] = rand_uniform();
-	}
+	FILE *fp = fopen("sim_recording.txt", "w");
+	fprintf(fp, "%lu\n%lu\n", nslots, total_queries);
 
 	// Insert items to this cuckoo filter
-	clock_t start_time = clock(), end_time;
 	size_t num_inserted = 0;
 	for (size_t i = 0; i < total_inserts; i++, num_inserted++) {
-		//uint64_t key = rand_uniform();
-		if (filter.Add(inserts[i]) != cuckoofilter::Ok) {
-			break;
+		uint64_t key = rand_uniform();
+		if (filter.Add(key) != cuckoofilter::Ok) {
+			printf("fatal error: inserts terminated early\n");
+			abort();
 		}
-		set_insert(set, set_len, inserts[i]);
+		set_insert(set, set_len, key);
+		fprintf(fp, "%lu\n", key);
 	}
-	end_time = clock();
-	printf("time per insert: %f\n", (double)(end_time - start_time) / num_inserted);
-	//return 0;
 
 	/*uint64_t *query_set = (uint64_t*)calloc(total_items, sizeof(uint64_t));
 	for (size_t i = 0; i < total_items; i++) {
@@ -189,56 +225,30 @@ int main(int argc, char **argv) {
 	}*/
 
 	// Check non-existing items, a few false positives expected
-	size_t total_queries = 10000000;
 	size_t fp_queries = 0;
-	size_t p_queries = 0;
 	/*for (size_t i = total_items; i < 2 * total_items; i++) {
 	  if (filter.Contain(i) == cuckoofilter::Ok) {
 	  false_queries++;
 	  }
 	  total_queries++;
 	  }*/
-
-	printf("generating queries\n");
-	uint64_t *queries = new uint64_t[total_queries];
 	for (size_t i = 0; i < total_queries; i++) {
-		queries[i] = rand_zipfian(1.5f, 1ull << 30);
-		//queries[i] = rand_uniform();
-	}
-
-	printf("performing queries\n");
-	start_time = clock();
-	for (size_t i = 0; i < total_queries; i++) {
-		uint64_t key = queries[i];
+		//uint64_t key = rand_uniform();
+		uint64_t key = rand_zipfian(1.5f, 1ull << 30);
 		//uint64_t key = query_set[i];
 		if (filter.Contain(key) == cuckoofilter::Ok) {
-			p_queries++;
 			if (!set_query(set, set_len, key)) {
 				fp_queries++;
-				if (filter.Adapt(key) != cuckoofilter::Ok) printf("error: adapt failed to find previously queried item\n");
+				filter.Adapt(key);
+				fprintf(fp, "1\t%lu\n", key);
+				continue;
 			}
 		}
+		fprintf(fp, "0\t%lu\n", key);
 	}
-	end_time = clock();
-	printf("time per query: %f\n", (double)(end_time - start_time) / total_queries);
-	printf("query throughput: %f\n", 1000000. * total_queries / (end_time - start_time));
+	fclose(fp);
 
-	printf("starting micro test\n");
-	start_time = clock();
-	for (size_t i = 0; i < total_queries; i++) {
-		uint64_t key = queries[i];
-		if (filter.Contain(key) == cuckoofilter::Ok) {
-			p_queries++;
-		}
-	}
-	end_time = clock();
-	printf("time per query: %f\n", (double)(end_time - start_time) / total_queries);
-	printf("query throughput: %f\n", 1000000. * total_queries / (end_time - start_time));
-
-
-	// Output the measured false positive rate
-	std::cout << "false positive rate: "
-		<< 100.0 * fp_queries / total_queries << "%\n";
+	printf("done\n");
 
 	return 0;
 }

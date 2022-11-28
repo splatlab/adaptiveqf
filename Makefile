@@ -1,11 +1,11 @@
 TARGETS=test test_threadsafe test_pc bm test_progress test_throughput test_deletions test_merge test_hash_accesses
 
-ifndef D
+ifdef D
 	DEBUG=-g
 	OPT=
 else
 	DEBUG=
-	OPT=-Ofast
+	OPT=-Ofast -DNDEBUG
 endif
 
 ifndef NH
@@ -14,7 +14,7 @@ else
 	ARCH=-msse4.2 -D__SSE4_2_
 endif
 
-ifndef P
+ifdef P
 	PROFILE=-pg -no-pie # for bug in gprof.
 endif
 
