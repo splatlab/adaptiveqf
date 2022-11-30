@@ -3074,6 +3074,75 @@ void qf_merge_ret(const QF *qfa, const QF *qfb, QF *qfc, uint64_t **coll_hash, i
 
 }
 
+// sorts the items in a list to prepare for use in qf_bulk_insert
+// assumes the items in the list have already been hashed
+void bulk_insert_sort_hashes(const QF *qf, uint64_t *keys, int nkeys) {
+	for (int i = 0; i < nkeys; i++) {
+	}
+}
+
+// assumes keys are provided in sorted order (by hash)
+// use the bulk_insert_sort function to ensure sorted order (to be implemented)
+// also assumes the qf is empty
+// assumes the item in the list have already been hashed
+void qf_bulk_insert(const QF *qf, uint64_t *keys, int nkeys) {
+	assert(qf->metadata->noccupied_slots == 0);
+	assert(qf->metadata->nslots * 0.95 > nkeys);
+	assert(nkeys > 0);
+	
+	uint64_t current_index = 0, current_run, current_rem, current_ext, current_ext_len = 0, current_count = 1, next_run, next_rem, next_ext;
+	if (nkeys > 0) {
+		current_run = (keys[i] >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+		current_rem = keys[i] & BITMASK(qf->metadata->bits_per_slot);
+		current_ext = keys[i] >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
+		current_index = current_run;
+	}
+	for (int i = 1; i < nkeys; i++) {
+		next_run = (keys[i] >> qf->metadata->bits_per_slot) & ((1 << qf->metadata->quotient_bits) - 1);
+		next_rem = keys[i] & BITMASK(qf->metadata->bits_per_slot);
+		next_ext = keys[i] >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
+		if (next_run != current_run) { // if the next item will be in a new run, close the current run with a runend
+			METADATA_WORD(qf, runends, current_index) |= (1ULL << (last_index % QF_SLOTS_PER_BLOCK));
+		}
+		else if (next_rem == current_rem) { // if the next item looks the same as the current item, we either need to extend or increment the counter
+			if (keys[i] == keys[i - 1]) { // if the current and next item are duplicates, add to the counter and hold off (the item after that may again be a duplicate)
+				current_count++;
+			}
+			else { // if the current and next item are different but just look the same, figure out how much to extend them by in order to differentiate them
+				int next_ext_len = 1;
+				uint64_t temp_curr_ext = current_ext;
+				uint64_t temp_next_ext = next_ext;
+				// figure out the minimum extension needed between the current and next item
+				while ((temp_curr_ext & BITMASK(qf->metadata->bits_per_slot)) == (temp_next_ext & BITMASK(qf->metadata->bits_per_slot))) {
+					next_ext_len++;
+					temp_curr_ext >>= qf->metadata->bits_per_slot;
+					temp_next_ext >>= qf->metadata->bits_per_slot;
+				}
+				// the current item must be long enough to differentiate from both the next and previous item
+				current_index = _merge_insert(qf, current_index, current_rem, current_ext, next_ext_len > current_ext_len ? next_ext_len : current_ext_len, current_count);
+				current_run = next_run;
+				current_rem = next_rem;
+				current_ext = next_ext;
+				current_ext_len = next_ext_len;
+				current_count = 1;
+			}
+			continue;
+		}
+		// no special relation between the current and next item; insert as usual
+		// any relevant relation between the current and previous items is encoded in current_ext_len and current_count
+		current_index = _merge_insert(qf, current_index, current_rem, current_ext, current_ext_len, current_count);
+		current_run = next_run;
+		current_rem = next_rem;
+		current_ext = next_ext;
+		current_ext_len = 0;
+		current_count = 1;
+	}
+	if (nkeys > 0) {
+		METADATA_WORD(qf, runends, current_index) |= (1ULL << (last_index % QF_SLOTS_PER_BLOCK));
+		_merge_insert(qf, current_index, current_rem, current_ext, current_ext_len, current_count);
+	}
+}
+
 /*
  * Merge an array of qfs into the resultant QF
  */

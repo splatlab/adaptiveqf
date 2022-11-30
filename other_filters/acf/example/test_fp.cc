@@ -165,7 +165,7 @@ int main(int argc, char **argv) {
 	srand(seed);
 	zipfian_seed = rand();
 
-	size_t nslots = 1 << 20;
+	size_t nslots = 1 << 24;
 	size_t total_inserts = nslots * 0.9;
 
 	// Create a cuckoo filter where each item is of type size_t and
@@ -175,7 +175,7 @@ int main(int argc, char **argv) {
 	// PackedTable, accepting keys of size_t type and making 13 bits
 	// for each key:
 	//   CuckooFilter<size_t, 13, cuckoofilter::PackedTable> filter(total_items);
-	CuckooFilter<size_t, 12> filter(total_inserts);
+	CuckooFilter<size_t, 8> filter(total_inserts);
 	int set_len = total_inserts * 1.3;
 	set_node *set = new set_node[set_len];
 	for (int i = 0; i < set_len; i++) {
@@ -247,17 +247,20 @@ int main(int argc, char **argv) {
 			}
 		}
 
-		if (i % 20000 == 0) {
-			printf("%lu\n", i);
-			double temp_fp = 0;
+		if (i % 20000 == 0 && i != 0) {
+			/*double temp_fp = 0;
 			for (size_t j = 0; j < 1000000; j++) {
+				key = queries[rand() % total_queries];
 				if (filter.Contain(key) == cuckoofilter::Ok) {
 					if (!set_query(set, set_len, key)) {
 						temp_fp++;
 					}
 				}
 			}
-			fprintf(output, "%lu\t%f\n", i, temp_fp / 1000000);
+			printf("%lu\t%f\n", i, temp_fp / 1000000);
+			fprintf(output, "%lu\t%f\n", i, temp_fp / 1000000);*/
+			printf("%lu\t%f\n", i, (double)fp_queries / i);
+			fprintf(output, "%lu\t%f\n", i, (double)fp_queries / i);
 		}
 	}
 	end_time = clock();
