@@ -2921,7 +2921,7 @@ static inline int _finger_cmp(uint64_t bits_per_item, uint64_t rema, uint64_t ex
  * Inserts a full item at the given index
  * Assumes all of the slots from this index onwards are unused
  */
-static inline uint64_t _merge_insert(QF *qf, uint64_t index, uint64_t rem, uint64_t ext, uint64_t ext_len, uint64_t count) {
+static inline uint64_t _merge_insert(QF *qf, uint64_t index, uint64_t run, uint64_t rem, uint64_t ext, uint64_t ext_len, uint64_t count) {
 	uint64_t current = index;
 	set_slot(qf, current++, rem);
 	for (int i = 0; i < ext_len; i++) {
@@ -2936,6 +2936,15 @@ static inline uint64_t _merge_insert(QF *qf, uint64_t index, uint64_t rem, uint6
 		METADATA_WORD(qf, extensions, current) |= (1ULL << (current % QF_SLOTS_PER_BLOCK));
 		METADATA_WORD(qf, runends, current) |= (1ULL << (current % QF_SLOTS_PER_BLOCK));
 		current++;
+	}
+	uint64_t bucket_block = run / QF_SLOTS_PER_BLOCK;
+	uint64_t current_block = (current - 1) / QF_SLOTS_PER_BLOCK;
+	if (current_block != bucket_block) {
+		for (int i = index; i < current; i++) {
+			if (i / QF_SLOTS_PER_BLOCK != bucket_block) {
+				get_block(qf, i / QF_SLOTS_PER_BLOCK)->offset++;
+			}
+		}
 	}
 	return current;
 }
@@ -2986,7 +2995,7 @@ void qf_merge_ret(const QF *qfa, const QF *qfb, QF *qfc, uint64_t **coll_hash, i
 				last_index = current_index;
 				switch (_finger_cmp(qfc->metadata->bits_per_slot, rema, exta, extlena, remb, extb, extlenb)) {
 					case 0:
-						current_index = _merge_insert(qfc, current_index, rema, exta, extlena, counta + countb);
+						current_index = _merge_insert(qfc, current_index, current_run, rema, exta, extlena, counta + countb);
 						if (coll_hash) {
 							(*coll_hash)[*coll_amt] = rema | (current_run << qfa->metadata->bits_per_slot) | (exta << (qfa->metadata->quotient_bits + qfa->metadata->bits_per_slot));
 							(*coll_len)[*coll_amt] = (extlena * qfa->metadata->bits_per_slot) + qfa->metadata->quotient_bits + qfa->metadata->bits_per_slot;
@@ -3003,12 +3012,12 @@ void qf_merge_ret(const QF *qfa, const QF *qfb, QF *qfc, uint64_t **coll_hash, i
 						qfi_get_hash(&qfib, &remb, &extb, &extlenb, &countb);
 						break;
 					case -1:
-						current_index = _merge_insert(qfc, current_index, rema, exta, extlena, counta);
+						current_index = _merge_insert(qfc, current_index, current_run, rema, exta, extlena, counta);
 						qfi_next(&qfia);
 						qfi_get_hash(&qfia, &rema, &exta, &extlena, &counta);
 						break;
 					case 1:
-						current_index = _merge_insert(qfc, current_index, remb, extb, extlenb, countb);
+						current_index = _merge_insert(qfc, current_index, current_run, remb, extb, extlenb, countb);
 						qfi_next(&qfib);
 						qfi_get_hash(&qfib, &remb, &extb, &extlenb, &countb);
 						break;
@@ -3018,7 +3027,7 @@ void qf_merge_ret(const QF *qfa, const QF *qfb, QF *qfc, uint64_t **coll_hash, i
 			else {
 				do {
 					last_index = current_index;
-					current_index = _merge_insert(qfc, current_index, rema, exta, extlena, counta);
+					current_index = _merge_insert(qfc, current_index, qfia.run, rema, exta, extlena, counta);
 					qfi_next(&qfia);
 					qfi_get_hash(&qfia, &rema, &exta, &extlena, &counta);
 				} while (qfia.run == current_run);
@@ -3029,7 +3038,7 @@ void qf_merge_ret(const QF *qfa, const QF *qfb, QF *qfc, uint64_t **coll_hash, i
 			if (qfib.run == current_run) {
 				do {
 					last_index = current_index;
-					current_index = _merge_insert(qfc, current_index, remb, extb, extlenb, countb);
+					current_index = _merge_insert(qfc, current_index, qfib.run, remb, extb, extlenb, countb);
 					qfi_next(&qfib);
 					qfi_get_hash(&qfib, &remb, &extb, &extlenb, &countb);
 				} while (qfib.run == current_run);
@@ -3054,7 +3063,7 @@ void qf_merge_ret(const QF *qfa, const QF *qfb, QF *qfc, uint64_t **coll_hash, i
 			}
 			last_index = current_index;
 			qfi_get_hash(&qfia, &rema, &exta, &extlena, &counta);
-			current_index = _merge_insert(qfc, current_index, rema, exta, extlena, counta);
+			current_index = _merge_insert(qfc, current_index, qfia.run, rema, exta, extlena, counta);
 		} while(!qfi_next(&qfia));
 	}
 	if (!qfi_end(&qfib)) {
@@ -3067,17 +3076,58 @@ void qf_merge_ret(const QF *qfa, const QF *qfb, QF *qfc, uint64_t **coll_hash, i
 			}
 			last_index = current_index;
 			qfi_get_hash(&qfib, &remb, &extb, &extlenb, &countb);
-			current_index = _merge_insert(qfc, current_index, remb, extb, extlenb, countb);
+			current_index = _merge_insert(qfc, current_index, qfib.run, remb, extb, extlenb, countb);
 		} while(!qfi_next(&qfib));
 	}
 	if (last_index != -1) METADATA_WORD(qfc, runends, last_index) |= (1ULL << (last_index % QF_SLOTS_PER_BLOCK));
 
 }
 
+inline int qf_hash_comp(const QF *qf, const uint64_t hash1, const uint64_t hash2) {
+	if (hash1 == hash2) return 0;
+	uint64_t temp1 = (hash1 >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+	uint64_t temp2 = (hash2 >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+	if (temp1 == temp2) {
+		temp1 = hash1 & BITMASK(qf->metadata->bits_per_slot);
+		temp2 = hash2 & BITMASK(qf->metadata->bits_per_slot);
+		if (temp1 == temp2) {
+			temp1 = hash1 >> qf->metadata->quotient_bits;
+			temp2 = hash2 >> qf->metadata->quotient_bits;
+			while (temp1 != 0 && temp2 != 0) {
+				temp1 >>= qf->metadata->bits_per_slot;
+				temp2 >>= qf->metadata->bits_per_slot;
+				if ((temp1 & BITMASK(qf->metadata->bits_per_slot)) == (temp2 & BITMASK(qf->metadata->bits_per_slot))) continue;
+				if ((temp1 & BITMASK(qf->metadata->bits_per_slot)) > (temp2 & BITMASK(qf->metadata->bits_per_slot))) return 1;
+				else return -1;
+			}
+			if (temp1 == 0) return -1;
+			else return 1;
+		}
+		else if (temp1 > temp2) return 1;
+		else return -1;
+	}
+	else if (temp1 > temp2) return 1;
+	else return -1;
+}
+
 // sorts the items in a list to prepare for use in qf_bulk_insert
 // assumes the items in the list have already been hashed
 void bulk_insert_sort_hashes(const QF *qf, uint64_t *keys, int nkeys) {
+	uint64_t rem, run, ext;
+	int ext_bits = 64 - qf->metadata->quotient_bits - qf->metadata->bits_per_slot;
 	for (int i = 0; i < nkeys; i++) {
+		rem = keys[i] & BITMASK(qf->metadata->bits_per_slot);
+		run = (keys[i] >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+		uint64_t temp_ext = keys[i] >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
+		int temp_ext_len = 0;
+		ext = 0;
+		for (temp_ext_len = 0; temp_ext > 0; temp_ext_len++) {
+			ext <<= 1;
+			ext |= temp_ext & 1;
+			temp_ext >>= 1;
+		}
+		ext <<= ext_bits - temp_ext_len;
+		keys[i] = ext | (rem << ext_bits) | (run << (ext_bits + qf->metadata->bits_per_slot));
 	}
 }
 
@@ -3092,17 +3142,19 @@ void qf_bulk_insert(const QF *qf, uint64_t *keys, int nkeys) {
 	
 	uint64_t current_index = 0, current_run, current_rem, current_ext, current_ext_len = 0, current_count = 1, next_run, next_rem, next_ext;
 	if (nkeys > 0) {
-		current_run = (keys[i] >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
-		current_rem = keys[i] & BITMASK(qf->metadata->bits_per_slot);
-		current_ext = keys[i] >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
+		current_run = (keys[0] >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+		current_rem = keys[0] & BITMASK(qf->metadata->bits_per_slot);
+		current_ext = keys[0] >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
 		current_index = current_run;
+		METADATA_WORD(qf, occupieds, current_run) |= (1ULL << (current_run % QF_SLOTS_PER_BLOCK));
 	}
 	for (int i = 1; i < nkeys; i++) {
 		next_run = (keys[i] >> qf->metadata->bits_per_slot) & ((1 << qf->metadata->quotient_bits) - 1);
 		next_rem = keys[i] & BITMASK(qf->metadata->bits_per_slot);
 		next_ext = keys[i] >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
 		if (next_run != current_run) { // if the next item will be in a new run, close the current run with a runend
-			METADATA_WORD(qf, runends, current_index) |= (1ULL << (last_index % QF_SLOTS_PER_BLOCK));
+			METADATA_WORD(qf, runends, current_index) |= (1ULL << (current_index % QF_SLOTS_PER_BLOCK));
+			METADATA_WORD(qf, occupieds, next_run) |= (1ULL << (next_run % QF_SLOTS_PER_BLOCK));
 		}
 		else if (next_rem == current_rem) { // if the next item looks the same as the current item, we either need to extend or increment the counter
 			if (keys[i] == keys[i - 1]) { // if the current and next item are duplicates, add to the counter and hold off (the item after that may again be a duplicate)
@@ -3119,7 +3171,7 @@ void qf_bulk_insert(const QF *qf, uint64_t *keys, int nkeys) {
 					temp_next_ext >>= qf->metadata->bits_per_slot;
 				}
 				// the current item must be long enough to differentiate from both the next and previous item
-				current_index = _merge_insert(qf, current_index, current_rem, current_ext, next_ext_len > current_ext_len ? next_ext_len : current_ext_len, current_count);
+				current_index = _merge_insert(qf, current_index, current_run, current_rem, current_ext, next_ext_len > current_ext_len ? next_ext_len : current_ext_len, current_count);
 				current_run = next_run;
 				current_rem = next_rem;
 				current_ext = next_ext;
@@ -3130,16 +3182,17 @@ void qf_bulk_insert(const QF *qf, uint64_t *keys, int nkeys) {
 		}
 		// no special relation between the current and next item; insert as usual
 		// any relevant relation between the current and previous items is encoded in current_ext_len and current_count
-		current_index = _merge_insert(qf, current_index, current_rem, current_ext, current_ext_len, current_count);
+		current_index = _merge_insert(qf, current_index, current_run, current_rem, current_ext, current_ext_len, current_count);
 		current_run = next_run;
+		if (current_index < current_run) current_index = current_run;
 		current_rem = next_rem;
 		current_ext = next_ext;
 		current_ext_len = 0;
 		current_count = 1;
 	}
 	if (nkeys > 0) {
-		METADATA_WORD(qf, runends, current_index) |= (1ULL << (last_index % QF_SLOTS_PER_BLOCK));
-		_merge_insert(qf, current_index, current_rem, current_ext, current_ext_len, current_count);
+		METADATA_WORD(qf, runends, current_index) |= (1ULL << (current_index % QF_SLOTS_PER_BLOCK));
+		_merge_insert(qf, current_index, current_run, current_rem, current_ext, current_ext_len, current_count);
 	}
 }
 
