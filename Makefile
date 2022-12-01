@@ -1,6 +1,7 @@
-TARGETS=test test_threadsafe test_pc bm test_progress test_throughput test_deletions test_merge test_hash_accesses test_bulk
+TARGETS=test test_threadsafe test_pc bm test_throughput test_deletions test_merge test_hash_accesses test_bulk test_whitelist
+# test_progress
 
-ifdef D
+ifndef D
 	DEBUG=-g
 	OPT=
 else
@@ -60,6 +61,10 @@ test_merge:								$(OBJDIR)/test_merge.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/partitioned_counter.o
 
 test_bulk:								$(OBJDIR)/test_bulk.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/hashutil.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_whitelist:								$(OBJDIR)/test_whitelist.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 
