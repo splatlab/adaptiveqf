@@ -89,7 +89,7 @@ typedef struct sglib_hashed_ilist_iterator ilist_iter;
 ilist *htab[HASH_TABLE_SIZE];
 
 //#define ILIST_COMPARATOR(e1, e2)    ((e1->rem + (1 << e1->len)) - (e2->rem + (1 << e2->len)))
-#define ILIST_COMPARATOR(e1, e2)    (e1->len == e2->len ? (e1->rem == e2->rem ? 0 : (e1->rem > e2->rem ? 1 : -1)) : (e1->len > e2->len ? 1 : 0))
+#define ILIST_COMPARATOR(e1, e2)    (e1->len == e2->len ? (e1->rem == e2->rem ? 0 : (e1->rem > e2->rem ? 1 : -1)) : (e1->len > e2->len ? 1 : -1))
 
 unsigned int ilist_hash_function(ilist *e) {
 	return e->rem + (1 << e->len);

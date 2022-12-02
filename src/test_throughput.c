@@ -88,7 +88,8 @@ typedef struct sglib_hashed_ilist_iterator ilist_iter;
 ilist *htab[HASH_TABLE_SIZE];
 
 //#define ILIST_COMPARATOR(e1, e2)    ((e1->rem + (1 << e1->len)) - (e2->rem + (1 << e2->len)))
-#define ILIST_COMPARATOR(e1, e2)    (e1->len != e2->len ? e2->len - e1->len : e2->rem - e1->rem)
+//#define ILIST_COMPARATOR(e1, e2)    (e1->len != e2->len ? e2->len - e1->len : e2->rem - e1->rem)
+#define ILIST_COMPARATOR(e1, e2)    (e1->len == e2->len ? (e1->rem == e2->rem ? 0 : (e1->rem > e2->rem ? 1 : -1)) : (e1->len > e2->len ? 1 : -1))
 
 unsigned int ilist_hash_function(ilist *e) {
 	return e->rem + (1 << e->len);
@@ -205,11 +206,6 @@ int main(int argc, char **argv)
 
 	qf_set_auto_resize(&qf, false);
 
-	//start_recording();
-
-	//uint64_t *nodes = malloc(sizeof(node) * num_inserts);
-	//uint64_t *tree = nodes[0]; // simple reverse map for testing - index equals hash
-	//uint64_t* values = malloc(sizeof(uint64_t) * num_inserts);
 	uint64_t ret_index, ret_hash;
 	int ret_hash_len;
 
