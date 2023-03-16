@@ -48,7 +48,7 @@ utaf: utaf.c
 	$(CC) -D TEST_UTAF=1 -o utaf.o utaf.c arcd.c murmur3.c bit_util.c set.c $(DEBUGFLAGS)
 
 taf: taf.c
-	$(CC) -D TEST_TAF=1 -o taf.o taf.c arcd.c murmur3.c bit_util.c set.c $(DEBUGFLAGS)
+	$(CC) -D TEST_TAF=1 -o taf.o taf.c arcd.c murmur3.c bit_util.c set.c $(CFLAGS) -lssl -lcrypto
 
 arcd: arcd.c
 	$(CC) -D TEST_ARCD=1 -o arcd.o arcd.c $(DEBUGFLAGS)

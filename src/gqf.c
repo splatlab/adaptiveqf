@@ -1839,6 +1839,9 @@ int insert_and_extend(QF *qf, uint64_t index, uint64_t key, uint64_t count, uint
 	//uint64_t other_hash = (other_key << qf->metadata->value_bits) | (other_value & BITMASK(qf->metadata->value_bits));
 	uint64_t hash = key;
 	uint64_t other_hash = other_key;
+	if ((hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) != (other_hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot))) {
+		printf("error: original hash is %lu and new hash is %lu\n", other_hash, hash);
+	}
 	assert((hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) == (other_hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot)));
 
 	int extended_len = 0;

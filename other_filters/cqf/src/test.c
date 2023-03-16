@@ -52,7 +52,7 @@ int main(int argc, char **argv)
 	uint64_t nhashbits = qbits + rbits;
 	uint64_t nslots = (1ULL << qbits);
 	uint64_t nvals = 90*nslots/100;
-	uint64_t key_count = 4;
+	uint64_t key_count = 1;
 	uint64_t *vals;
 
 	/* Initialise the CQF */
@@ -78,6 +78,21 @@ int main(int argc, char **argv)
 		/*fprintf(stdout, "%lx\n", vals[i]);*/
 	}
 
+	for (i = 0; qf.metadata->noccupied_slots < target_fill; i++) {
+                if (!insert_key(&qf, htab, insert_set[i], 1)) break;
+                if (qf.metadata->noccupied_slots > next_measurement) {
+                        printf("%f:\t%f\n", current_measurement_point, 1000000.0f * (measurement_interval * target_fill) / (clock() - start_time));
+                        current_measurement_point += measurement_interval;
+                        next_measurement = current_measurement_point * target_fill;
+                        start_time = clock();
+                }
+        }
+        printf("%f:\t%f\n", current_measurement_point, 1000000.0f * (measurement_interval * target_fill) / (clock() - start_time));
+
+	double measurement_interval = 0.05;
+	double current_measurement_point = measurement_interval;
+	uint64_t next_measurement = current_measurement_interval * nvals;
+
 	clock_t start_time = clock(), end_time;
 	/* Insert keys in the CQF */
 	for (uint64_t i = 0; i < nvals; i++) {
@@ -94,6 +109,7 @@ int main(int argc, char **argv)
 				fprintf(stderr, "Does not recognise return value.\n");
 			abort();
 		}
+		
 	}
 	end_time = clock();
 	printf("time per insert: %f\n", (double)(end_time - start_time) / nvals);

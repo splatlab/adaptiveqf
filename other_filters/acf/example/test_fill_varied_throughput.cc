@@ -142,13 +142,15 @@ int main(int argc, char **argv) {
 	//srand(time(NULL));
 	uint64_t seed = 1669602171;
 	seed = time(NULL);
+	seed = 0;
 	printf("running on seed %lu\n", seed);
 	srand(seed);
 	zipfian_seed = rand();
 
-	size_t nslots = 1 << 20;
+	size_t nslots = 1 << 24;
 	size_t total_inserts = nslots * 0.9;
 
+	printf("initializing filter...\n");
 	// Create a cuckoo filter where each item is of type size_t and
 	// use 12 bits for each item:
 	//    CuckooFilter<size_t, 12> filter(total_items);
@@ -157,6 +159,8 @@ int main(int argc, char **argv) {
 	// for each key:
 	//   CuckooFilter<size_t, 13, cuckoofilter::PackedTable> filter(total_items);
 	CuckooFilter<size_t, 12> filter(total_inserts);
+
+	printf("initializing hash table...\n");
 	int set_len = total_inserts * 1.3;
 	set_node *set = new set_node[set_len];
 	for (int i = 0; i < set_len; i++) {
@@ -164,88 +168,38 @@ int main(int argc, char **argv) {
 		set[i].next = NULL;
 	}
 
+	printf("generating inserts...\n");
 	uint64_t *inserts = new uint64_t[total_inserts];
-	for (size_t i = 0; i < total_inserts; i++) {
+	/*for (size_t i = 0; i < total_inserts; i++) {
 		inserts[i] = rand_uniform();
-	}
+	}*/
+	RAND_bytes((unsigned char*)inserts, total_inserts * sizeof(uint64_t));
 
-	printf("starting inserts\n");
-
+	printf("starting inserts...\n");
 	// Insert items to this cuckoo filter
-	clock_t start_time = clock(), end_time;
+	clock_t start_time = clock();
 	size_t num_inserted = 0;
 
+	double measurement_interval = 0.05f;
+	double current_measurement_point = measurement_interval;
+	uint64_t next_measurement = current_measurement_point * nslots;
+	start_time = clock();
 	for (size_t i = 0; i < total_inserts; i++, num_inserted++) {
 		//uint64_t key = rand_uniform();
 		if (filter.Add(inserts[i]) != cuckoofilter::Ok) {
+			filter.Add(inserts[i - 1]);
 			break;
 		}
 		set_insert(set, set_len, inserts[i]);
+		if (i > next_measurement) {
+			printf("%f\t%f\n", current_measurement_point, 1000000.0f * (measurement_interval * nslots) / (clock() - start_time));
+			current_measurement_point += measurement_interval;
+			next_measurement = current_measurement_point * nslots;
+			start_time = clock();
+		}
 	}
+	printf("%f\t%f\n", current_measurement_point, 1000000.0f * (measurement_interval * nslots) / (clock() - start_time));
 	printf("made %lu inserts\n", num_inserted);
-
-	end_time = clock();
-	printf("time per insert: %f\n", (double)(end_time - start_time) / num_inserted);
-	//return 0;
-
-	/*uint64_t *query_set = (uint64_t*)calloc(total_items, sizeof(uint64_t));
-	for (size_t i = 0; i < total_items; i++) {
-		//query_set[i] = rand_zipfian(1.5f, 1lu << 30);
-		query_set[i] = i + total_items;
-	}*/
-
-	// Check non-existing items, a few false positives expected
-	size_t total_queries = 10000000;
-	size_t fp_queries = 0;
-	size_t p_queries = 0;
-	/*for (size_t i = total_items; i < 2 * total_items; i++) {
-	  if (filter.Contain(i) == cuckoofilter::Ok) {
-	  false_queries++;
-	  }
-	  total_queries++;
-	  }*/
-
-	printf("generating queries\n");
-	uint64_t *queries = new uint64_t[total_queries];
-	/*for (size_t i = 0; i < total_queries; i++) {
-		queries[i] = rand_zipfian(1.5f, 1ull << 30);
-		//queries[i] = rand_uniform();
-	}*/
-	RAND_bytes((unsigned char*)queries, total_queries * sizeof(uint64_t));
-
-	printf("performing queries\n");
-	start_time = clock();
-	for (size_t i = 0; i < total_queries; i++) {
-		uint64_t key = queries[i];
-		//uint64_t key = query_set[i];
-		if (filter.Contain(key) == cuckoofilter::Ok) {
-			p_queries++;
-			if (!set_query(set, set_len, key)) {
-				fp_queries++;
-				if (filter.Adapt(key) != cuckoofilter::Ok) printf("error: adapt failed to find previously queried item\n");
-			}
-		}
-	}
-	end_time = clock();
-	printf("time per query: %f\n", (double)(end_time - start_time) / total_queries);
-	printf("query throughput: %f\n", 1000000. * total_queries / (end_time - start_time));
-
-	printf("starting micro test\n");
-	start_time = clock();
-	for (size_t i = 0; i < total_queries; i++) {
-		uint64_t key = queries[i];
-		if (filter.Contain(key) == cuckoofilter::Ok) {
-			p_queries++;
-		}
-	}
-	end_time = clock();
-	printf("time per query: %f\n", (double)(end_time - start_time) / total_queries);
-	printf("query throughput: %f\n", 1000000. * total_queries / (end_time - start_time));
-
-
-	// Output the measured false positive rate
-	std::cout << "false positive rate: "
-		<< 100.0 * fp_queries / total_queries << "%\n";
 
 	return 0;
 }

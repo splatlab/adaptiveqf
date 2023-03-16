@@ -1,7 +1,8 @@
-TARGETS=test test_threadsafe test_pc bm test_throughput test_deletions test_merge test_hash_accesses test_bulk test_whitelist
+CTARGETS=test test_threadsafe test_pc bm test_throughput test_fill_varied_throughput test_near_full test_deletions test_merge test_hash_accesses test_bulk test_whitelist
+CXXTARGETS=test_ext_throughput
 # test_progress
 
-ifndef D
+ifdef D
 	DEBUG=-g
 	OPT=
 else
@@ -15,7 +16,7 @@ else
 	ARCH=-msse4.2 -D__SSE4_2_
 endif
 
-ifdef P
+ifndef P
 	PROFILE=-pg -no-pie # for bug in gprof.
 endif
 
@@ -28,7 +29,7 @@ CC = gcc -std=gnu11
 CXX = g++ -std=c++11
 LD= gcc -std=gnu11
 
-CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -m64 -I. -Iinclude
+CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -lpthread -lssl -lcrypto -lstxxl -m64 -I. -Iinclude
 
 LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm
 
@@ -36,11 +37,11 @@ LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm
 # declaration of dependencies
 #
 
-all: $(TARGETS)
+all: $(CTARGETS) $(CXXTARGETS)
 
 # dependencies between programs and .o files
 
-test:								$(OBJDIR)/test.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+test:									$(OBJDIR)/test.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 
@@ -48,7 +49,15 @@ test_progress:								$(OBJDIR)/test_progress.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_fi
 										$(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 
-test_throughput:								$(OBJDIR)/test_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+test_throughput:							$(OBJDIR)/test_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/hashutil.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_fill_varied_throughput:						$(OBJDIR)/test_fill_varied_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/hashutil.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_near_full:								$(OBJDIR)/test_near_full.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 
@@ -68,19 +77,23 @@ test_whitelist:								$(OBJDIR)/test_whitelist.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_
 										$(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 
-test_hash_accesses:								$(OBJDIR)/test_hash_accesses.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+test_hash_accesses:							$(OBJDIR)/test_hash_accesses.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 
-test_threadsafe:		$(OBJDIR)/test_threadsafe.o $(OBJDIR)/gqf.o \
+test_threadsafe:							$(OBJDIR)/test_threadsafe.o $(OBJDIR)/gqf.o \
 										$(OBJDIR)/gqf_file.o $(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 
-test_pc:						$(OBJDIR)/test_partitioned_counter.o $(OBJDIR)/gqf.o \
+test_pc:								$(OBJDIR)/test_partitioned_counter.o $(OBJDIR)/gqf.o \
 										$(OBJDIR)/gqf_file.o $(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 
 bm:									$(OBJDIR)/bm.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_ext_throughput:							$(OBJDIR)/test_ext_throughput.o $(OBJDIR)/gqf.o \
 										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 
@@ -109,8 +122,11 @@ $(OBJDIR)/partitioned_counter.o:	$(LOC_INCLUDE)/partitioned_counter.h
 # generic build rules
 #
 
-$(TARGETS):
+$(CTARGETS):
 	$(LD) $^ -o $@ $(LDFLAGS)
+
+$(CXXTARGETS):
+	$(CXX) $^ -o $@ $(CXXFLAGS)
 
 $(OBJDIR)/%.o: $(LOC_SRC)/%.cc | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) $< -c -o $@
@@ -125,4 +141,4 @@ $(OBJDIR):
 	@mkdir -p $(OBJDIR)
 
 clean:
-	rm -rf $(OBJDIR) $(TARGETS) core
+	rm -rf $(OBJDIR) $(CTARGETS) $(CXXTARGETS) core

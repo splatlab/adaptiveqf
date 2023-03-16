@@ -209,11 +209,12 @@ int main(int argc, char **argv)
 	}*/
 	RAND_bytes((unsigned char*)keys, nkeys * sizeof(uint64_t));
 
+	clock_t start_time, end_time;
+	start_time = clock();
 	printf("sorting inserts...\n");
 	qsort(keys, nkeys, sizeof(uint64_t), comp);
 
 	printf("bulk inserting...\n");
-	clock_t start_time = clock(), end_time;
 	qf_bulk_insert(&qf, keys, nkeys);
 	end_time = clock();
 	snapshot(&qf);

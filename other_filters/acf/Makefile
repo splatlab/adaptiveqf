@@ -3,12 +3,12 @@ AR = ar
 PREFIX=/usr/local
 
 # Uncomment one of the following to switch between debug and opt mode
-OPT = -DNDEBUG
+OPT = -DNDEBUG -Ofast #-pg
 #OPT = -g -ggdb
 
 CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ $(OPT)
 
-LDFLAGS+= -Wall -lpthread -lssl -lcrypto
+LDFLAGS+= -Wall -lpthread -lssl -lcrypto -lstxxl #-pg
 
 LIBOBJECTS = \
 	./src/hashutil.o \
@@ -16,7 +16,7 @@ LIBOBJECTS = \
 HEADERS = $(wildcard src/*.h)
 ALIB = libcuckoofilter.a
 
-TEST = test test_fp test_bits test_raw
+TEST = test_ext_throughput #test test_fp test_bits test_micro test_fill_varied_throughput
 
 all: $(TEST)
 
@@ -26,6 +26,9 @@ clean:
 test: example/test.o $(LIBOBJECTS) 
 	$(CC) example/test.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
+test_fill_varied_throughput: example/test_fill_varied_throughput.o $(LIBOBJECTS) 
+	$(CC) example/test_fill_varied_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
 test_fp: example/test_fp.o $(LIBOBJECTS) 
 	$(CC) example/test_fp.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
@@ -34,6 +37,9 @@ test_bits: example/test_bits.o $(LIBOBJECTS)
 
 test_micro: example/test_micro.o $(LIBOBJECTS)
 	$(CC) example/test_micro.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_ext_throughput: example/test_ext_throughput.o $(LIBOBJECTS)
+	$(CC) example/test_ext_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
 %.o: %.cc ${HEADERS} Makefile
 	$(CC) $(CFLAGS) $< -o $@

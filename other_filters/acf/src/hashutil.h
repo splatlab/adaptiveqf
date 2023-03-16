@@ -66,7 +66,8 @@ class TwoIndependentMultiplyShift {
   }
 
   uint64_t operator()(const uint64_t key) const {
-    return (add_ + multiply_ * static_cast<decltype(multiply_)>(key)) >> 64;
+	  uint64_t ret = (add_ + multiply_ * static_cast<decltype(multiply_)>(key)) >> 64;
+	  return ret ? ret : 1;
   }
 };
 

@@ -319,7 +319,7 @@ int main(int argc, char **argv)
 					}
 				}
 			}
-			if (i % 100000) {
+			if (i % 100000 == 0 && i != 0) {
 				printf("churning...\n");
 				uint64_t current_fill = qf_get_num_occupied_slots(&qf);
 				for (int r = 0; r < 0.01 * current_fill;) {

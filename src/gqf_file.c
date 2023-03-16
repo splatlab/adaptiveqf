@@ -199,7 +199,7 @@ int64_t qf_resize_file(QF *qf, uint64_t nslots)
 	int64_t ret_numkeys = 0;
 	do {
 		uint64_t key, value, count;
-		qfi_get_hash(&qfi, &key, &value, &count);
+		//qfi_get_hash(&qfi, &key, &value, &count);
 		qfi_next(&qfi);
 		int ret = qf_insert(&new_qf, key, value, count, QF_NO_LOCK | QF_KEY_IS_HASH);
 		if (ret < 0) {

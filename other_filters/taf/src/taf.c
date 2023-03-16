@@ -6,6 +6,7 @@
 #include <string.h>
 #include <execinfo.h>
 #include <time.h>
+#include <openssl/rand.h>
 
 #include "murmur3.h"
 #include "macros.h"
@@ -973,16 +974,37 @@ void test_insert_and_query() {
   double load = 0.9;
   size_t s = nearest_pow_of_2((size_t)((double)a / a_s));
   s = (size_t)((double)s * load);
-  TAF* filter = new_taf(1 << 20);
-  s = (1 << 20) * load;
+  TAF* filter = new_taf(a);
+  s = a * load;
 
   // Generate query set
   srandom(time(NULL));
   int nset = (int)(1.5*(double)s);
   Setnode* set = calloc(nset, sizeof(set[0]));
 
-  clock_t start_time = clock();
+  elt_t *elts_to_insert = malloc(s * sizeof(elt_t));
+  RAND_bytes((unsigned char*)elts_to_insert, s * sizeof(elt_t));
+
   char str[64];
+	double measurement_interval = 0.05f;
+        double current_measurement_point = measurement_interval;
+        uint64_t next_measurement = current_measurement_point * a;
+        clock_t end_time, start_time = clock();
+        for (int i = 0; i < s; i++) {
+		sprintf(str, "%lu", elts_to_insert[i]);
+                set_insert(str, (int)strlen(str), 0, set, nset);
+		taf_insert(filter, elts_to_insert[i]);
+                if (i > next_measurement) {
+                        printf("%f:\t%f\n", current_measurement_point, 1000000.0f * (measurement_interval * a) / (clock() - start_time));
+                        current_measurement_point += measurement_interval;
+                        next_measurement = current_measurement_point * a;
+                        start_time = clock();
+                }
+        }
+        printf("%f:\t%f\n", current_measurement_point, 1000000.0f * (measurement_interval * a) / (clock() - start_time));
+
+  /*char str[64];
+  clock_t start_time = clock();
   for (int i=0; i<s; i++) {
     elt_t elt = random();
     sprintf(str, "%lu", elt);
@@ -992,17 +1014,18 @@ void test_insert_and_query() {
     //assert(taf_lookup(filter, elt));
   }
   clock_t end_time = clock();
-  avg_insert_time += (double)(end_time - start_time) / s;
+  avg_insert_time += (double)(end_time - start_time) / s;*/
 
-  int num_queries = 1000000;
+  int num_queries = 10000000;
   // Query [0, a] and ensure that all items in the set return true
   int fps = 0;
   int fns = 0;
 
   elt_t *query_set = calloc(num_queries, sizeof(elt_t));
-  for (int i = 0; i < num_queries; i++) {
+  /*for (int i = 0; i < num_queries; i++) {
 	  query_set[i] = rand_zipfian(1.5f, 1lu << 30);
-  }
+  }*/
+  RAND_bytes((unsigned char*)query_set, num_queries * sizeof(elt_t));
 
   start_time = clock();
   for (int i=0; i<num_queries; i++) {
@@ -1581,14 +1604,14 @@ int main(int argc, char *argv[]) {
 
   //test_dataset_evolution("../../../aqf/AdaptiveQF/data/shalla.txt", "progress.csv", 10, 1000000, 2000000, 100);
   //test_dataset_evolution("../../../aqf/AdaptiveQF/data/20140619-140100.csv", "progress.csv", 10, 1000000, 1000000, 100);
-  /*int num_trials = 1;
+  int num_trials = 1;
   for (int i = 0; i < num_trials; i++) {
   	test_insert_and_query();
   }
   printf("insert time: %f\n", avg_insert_time / num_trials);
   printf("query time: %f\n", avg_query_time / num_trials);
-  printf("fp rate: %f\n", avg_fp_rate / num_trials);*/
+  printf("fp rate: %f\n", avg_fp_rate / num_trials);
 
-	test_hash_accesses(20, 8, 0.9, 10000000, 0);
+	//test_hash_accesses(20, 8, 0.9, 10000000, 0);
 }
 #endif // TEST_TAF
