@@ -1,6 +1,7 @@
-TARGETS=test test_threadsafe test_pc bm test_hash_accesses test_fill_varied_throughput
+CTARGETS=test_threadsafe test_pc bm test_hash_accesses #test_fill_varied_throughput #test
+CXXTARGETS=test_ext_throughput test_adversarial
 
-ifndef D
+ifdef D
 	DEBUG=-g
 	OPT=
 else
@@ -27,7 +28,8 @@ CC = gcc -std=gnu11
 CXX = g++ -std=c++11
 LD= gcc -std=gnu11
 
-CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -m64 -I. -Iinclude
+#CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -m64 -I. -Iinclude
+CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -lpthread -lssl -lcrypto -lstxxl -m64 -I. -Iinclude
 
 LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm
 
@@ -35,7 +37,7 @@ LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm
 # declaration of dependencies
 #
 
-all: $(TARGETS)
+all: $(CTARGETS) $(CXXTARGETS)
 
 # dependencies between programs and .o files
 
@@ -64,6 +66,14 @@ bm:									$(OBJDIR)/bm.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
 
+test_ext_throughput:                                                    $(OBJDIR)/test_ext_throughput.o $(OBJDIR)/gqf.o \
+                                                                                $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
+                                                                                $(OBJDIR)/partitioned_counter.o
+
+test_adversarial:                                                    $(OBJDIR)/test_adversarial.o $(OBJDIR)/gqf.o \
+                                                                                $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
+                                                                                $(OBJDIR)/partitioned_counter.o
+
 # dependencies between .o files and .h files
 
 $(OBJDIR)/test.o: 						$(LOC_INCLUDE)/gqf.h $(LOC_INCLUDE)/gqf_file.h \
@@ -89,8 +99,11 @@ $(OBJDIR)/partitioned_counter.o:	$(LOC_INCLUDE)/partitioned_counter.h
 # generic build rules
 #
 
-$(TARGETS):
+$(CTARGETS):
 	$(LD) $^ -o $@ $(LDFLAGS)
+
+$(CXXTARGETS):
+	$(CXX) $^ -o $@ $(CXXFLAGS)
 
 $(OBJDIR)/%.o: $(LOC_SRC)/%.cc | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) $< -c -o $@

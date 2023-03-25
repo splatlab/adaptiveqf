@@ -13,7 +13,6 @@ extern "C" {
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
-#include <time.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/mman.h>
@@ -26,6 +25,7 @@ extern "C" {
 #include "include/hashutil.h"
 }
 
+#include <ctime>
 #include <stxxl/unordered_map>
 #include <stxxl/map>
 
@@ -168,6 +168,15 @@ typedef struct test_struct {
 	int b;
 } test_struct;
 
+#define USE_UNORDERED_MAP 0
+#if USE_UNORDERED_MAP
+#define BACKING_MAP_T unordered_map_t
+#define BACKING_MAP_INSERT(X, Y, Z) X.insert(std::make_pair(Y, Z));
+#else
+#define BACKING_MAP_T ordered_map_t
+#define BACKING_MAP_INSERT(X, Y, Z) X.insert(pair_t(Y, Z));
+#endif
+
 #define SUB_BLOCK_SIZE 8192
 #define SUB_BLOCKS_PER_BLOCK 256
 
@@ -203,7 +212,7 @@ typedef std::pair<uint64_t, uint64_t> pair_t;
 int map_inserts = 0;
 int map_queries = 0;
 
-int insert_key(QF *qf, unordered_map_t& map, uint64_t key, int count) {
+int insert_key(QF *qf, BACKING_MAP_T& map, uint64_t key, int count) {
         uint64_t ret_index, ret_hash, ret_other_hash;
         int ret_hash_len;
         int ret = qf_insert_ret(qf, key, count, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH);
@@ -211,7 +220,7 @@ int insert_key(QF *qf, unordered_map_t& map, uint64_t key, int count) {
                 return 0;
         }
         else if (ret == 0) {
-		unordered_map_t::iterator item = map.find(ret_hash | (1 << ret_hash_len));
+		BACKING_MAP_T::iterator item = map.find(ret_hash | (1 << ret_hash_len));
 		map_queries++;
                 if (item == map.end()) {
                         printf("error:\tfilter claimed to have fingerprint %lu but hashtable could not find it\n", ret_hash);
@@ -227,14 +236,14 @@ int insert_key(QF *qf, unordered_map_t& map, uint64_t key, int count) {
                         }
 
 			map.erase(item);
-			map.insert(std::make_pair(ret_other_hash | (1 << ret_hash_len), item->second));
-			map.insert(std::make_pair(ret_hash | (1 << ret_hash_len), key));
+			BACKING_MAP_INSERT(map, ret_other_hash | (1 << ret_hash_len), item->second);
+			BACKING_MAP_INSERT(map, ret_hash | (1 << ret_hash_len), key);
 			map_inserts++;
 			map_inserts++;
                 }
         }
         else if (ret == 1) {
-		map.insert(std::make_pair(ret_hash | (1 << ret_hash_len), key));
+		BACKING_MAP_INSERT(map, ret_hash | (1 << ret_hash_len), key);
 		map_inserts++;
         }
         else {
@@ -247,13 +256,13 @@ int insert_key(QF *qf, unordered_map_t& map, uint64_t key, int count) {
 
 int main(int argc, char **argv)
 {
-	if (argc < 5) {
-		fprintf(stderr, "Please specify \nthe log of the number of slots in the QF\nthe number of remainder bits in the Q\nthe load factor\nthe number of queries\n");
+	if (argc < 4) {
+		fprintf(stderr, "Please specify \nthe log of the number of slots in the QF\nthe number of remainder bits in the QF\nthe number of queries\n");
 		// ./test 16 7 $((1 << 15)) 1000000 0
 		exit(1);
 	}
-	if (argc >= 6) {
-		srand(strtol(argv[5], NULL, 10));
+	if (argc >= 5) {
+		srand(strtol(argv[4], NULL, 10));
 		printf("running test on seed %ld\n", strtol(argv[5], NULL, 10));
 	}
 	else {
@@ -273,14 +282,18 @@ int main(int argc, char **argv)
 
 	uint64_t nhashbits = qbits + rbits;
 	uint64_t nslots = (1ULL << qbits);
-	double load_factor = atof(argv[3]);
+	double load_factor = 0.95f;
 	uint64_t num_inserts = nslots * load_factor;//strtoull(argv[3], NULL, 10);
-	uint64_t num_queries = strtoull(argv[4], NULL, 10);
+	uint64_t num_queries = strtoull(argv[3], NULL, 10);
 
 
 	printf("initializing hash table...\n");
+#if USE_UNORDERED_MAP
 	unordered_map_t backing_map;
 	//backing_map.max_buffer_size(SUB_BLOCK_SIZE);
+#else
+	ordered_map_t backing_map((ordered_map_t::node_block_type::raw_size) * 3, (ordered_map_t::leaf_block_type::raw_size) * 3);
+#endif	
 	ordered_map_t database((ordered_map_t::node_block_type::raw_size) * 3, (ordered_map_t::leaf_block_type::raw_size) * 3);
 	
 
@@ -310,24 +323,24 @@ int main(int argc, char **argv)
         double current_interval = measure_interval;
         uint64_t measure_point = nslots * current_interval, last_point = 0;
 
+	printf("CLOCKS_PER_SEC: %ld\n", CLOCKS_PER_SEC);
 	clock_t start_time = clock(), end_time, interval_time = start_time;
-	for (i = 0; qf.metadata->noccupied_slots <= target_fill; i++) {
+	for (i = 0; current_interval != 1./*qf.metadata->noccupied_slots <= target_fill*/; i++) {
 		if (!insert_key(&qf, backing_map, insert_set[i], 1)) break;
-		//database.insert(pair_t(insert_set[i], i));
-		if (i >= measure_point) {
-                        printf("throughput for interval %f: \t%f\n", current_interval, 1000000. * (i - last_point) / (clock() - interval_time));
+		database.insert(pair_t(insert_set[i], i));
+		if (qf.metadata->noccupied_slots >= measure_point) {
+                        printf("throughput for interval %f: \t%f\n", current_interval, (double)(i - last_point) * CLOCKS_PER_SEC / (clock() - interval_time));
 			printf("map inserts: %d\tmap_queries: %d\n", map_inserts, map_queries);
                         current_interval += measure_interval;
-                        last_point = measure_point;
+                        last_point = i;
                         measure_point = nslots * current_interval;
                         interval_time = clock();
                 }
 	}
 	end_time = clock();
 
-	printf("time for inserts:  %ld us\n", end_time - start_time);
-	printf("time per insert:   %f us\n", (double)(end_time - start_time) / num_queries);
-	printf("insert throughput: %f ops/sec\n", 1000000. * num_queries / (end_time - start_time));
+	printf("time for inserts:      %f\n", (double)(end_time - start_time) / CLOCKS_PER_SEC);
+	printf("avg insert throughput: %f ops/sec\n", (double)i * CLOCKS_PER_SEC / (end_time - start_time));
 
 
 	// PERFORM QUERIES
@@ -339,10 +352,6 @@ int main(int argc, char **argv)
 	}
 
 	uint64_t *query_set = (uint64_t*)calloc(num_queries, sizeof(uint64_t));
-	/*for (i = 0; i < num_queries; i++) {
-		//query_set[i] = rand_uniform(universe);
-		query_set[i] = rand_zipfian(1.5f, 1ull << 30);
-	}*/
 	RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
 
 
@@ -353,13 +362,11 @@ int main(int argc, char **argv)
 		j = query_set[i];
 
 		if (qf_query(&qf, j, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH)) {
-			unordered_map_t::iterator orig_key = backing_map.find(ret_hash | (1 << ret_hash_len));
-			if (orig_key == backing_map.end() || orig_key->first == 0 || orig_key->second != j) {
-			//ordered_map_t::iterator item = database.find(j);
-			//if (item == database.end() || item->first == 0) {
+			ordered_map_t::iterator item = database.find(j);
+			if (item == database.end()) {
 				fp_count++;
 				if (still_have_space) {
-					//unordered_map_t::iterator orig_key = backing_map.find(ret_hash | (1 << ret_hash_len));
+					BACKING_MAP_T::iterator orig_key = backing_map.find(ret_hash | (1 << ret_hash_len));
 					ret_hash_len = qf_adapt(&qf, ret_index, orig_key->second, j, &ret_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
 					if (ret_hash_len > 0) {
 						backing_map.erase(orig_key);
@@ -375,9 +382,8 @@ int main(int argc, char **argv)
 	}
 	end_time = clock();
 
-	printf("time for queries:  %ld us\n", end_time - start_time);
-	printf("time per query:    %f us\n", (double)(end_time - start_time) / num_queries);
-	printf("query throughput:  %f ops/sec\n", 1000000. * num_queries / (end_time - start_time));
+	printf("time for queries:  %f s\n", (double)(end_time - start_time) / CLOCKS_PER_SEC);
+	printf("query throughput:  %f ops/sec\n", (double)num_queries * CLOCKS_PER_SEC / (end_time - start_time));
 
 	printf("false positive rate: %f%%\n", 100. * fp_count / num_queries);
 }
