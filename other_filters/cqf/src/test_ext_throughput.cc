@@ -25,6 +25,8 @@ extern "C" {
 #include "include/gqf_file.h"
 }
 
+#include <iostream>
+
 #include <stxxl/unordered_map>
 #include <stxxl/map>
 
@@ -68,8 +70,8 @@ uint64_t MurmurHash64A(const void* key, int len, uint64_t seed) {
 	return h;
 }
 
-double rand_zipfian(double s, double max) {
-        double p = (double)rand() / RAND_MAX;
+double rand_zipfian(double s, double max, uint64_t rnd) {
+        double p = (double)(rnd % RAND_MAX) / RAND_MAX;
 
         double pD = p * (12 * (pow(max, -s + 1) - 1) / (1 - s) + 6 + 6 * pow(max, -s) + s - s * pow(max, -s + 1));
         double x = max / 2;
@@ -89,8 +91,14 @@ double rand_zipfian(double s, double max) {
         }
 }
 
-#define USE_UNORDERED_MAP 1
+#define USE_UNORDERED_MAP 0
 #define ZIPFIAN_QUERIES 0
+
+#if USE_UNORDERED_MAP
+#define BACKING_MAP_T unordered_map_t
+#else
+#define BACKING_MAP_T ordered_map_t
+#endif
 
 #define SUB_BLOCK_SIZE (8192)
 #define SUB_BLOCKS_PER_BLOCK (256)
@@ -128,12 +136,12 @@ int map_queries = 0;
 int main(int argc, char **argv)
 {
 #if 0
-	uint64_t hash_seed_temp = rand();
-	RAND_bytes((unsigned char*)(&hash_seed_temp), sizeof(uint64_t));
-	for (int n = 0; n < 50; n++) {
-		uint64_t z = rand_zipfian(1.5f, 100);
-		printf("%lu\n", MurmurHash64A((unsigned char*)(&z), sizeof(uint64_t), hash_seed_temp));
+	std::cout << "progress: 0" << std::flush;
+	for (int i = 1; i <= 10; i++) {
+		
+		std::cout << "\rprogress: " << i << std::flush;
 	}
+	std::cout << std::endl;
 	return 0;
 #endif
 
@@ -156,7 +164,7 @@ int main(int argc, char **argv)
 	uint64_t nslots = (1ULL << qbits);
 	uint64_t num_inserts = nslots * 0.96;
 	uint64_t *insert_set;
-	printf("qbits=%lu\trbits=%lu\n", qbits, rbits);
+	printf("qbits: %lu\trbits: %lu\n", qbits, rbits);
 
 	/* Initialise the CQF */
 	/*if (!qf_malloc(&qf, nslots, nhashbits, 0, QF_HASH_INVERTIBLE, 0)) {*/
@@ -239,26 +247,88 @@ int main(int argc, char **argv)
 	printf("generating query set\n");
 	uint64_t *query_set = new uint64_t[num_queries];
 	RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
-#if ZIPFIAN_QUERIES
-	uint64_t hash_seed = rand();
-	RAND_bytes((unsigned char*)(&hash_seed), sizeof(uint64_t));
-	for (i = 0; i < num_queries; i++) {
-		query_set[i] = (uint64_t)rand_zipfian(1.5f, 1000000ull);
-		query_set[i] = MurmurHash64A((unsigned char*)(&query_set[i]), sizeof(uint64_t), hash_seed);
-	}
-#endif
 
+#if ZIPFIAN_QUERIES
+	std::cout << "turning query set zipfian... 0%" << std::flush;
+	int zipfianfy_progress = 5;
+	uint64_t zipfianfy_progress_point = 0.01f * zipfianfy_progress * num_queries;
+	for (i = 0; i < num_queries; i++) {
+		query_set[i] = (uint64_t)rand_zipfian(1.5f, 1000000ull, query_set[i]);
+		if (i >= zipfianfy_progress_point) {
+			std::cout << "\rturning query set zipfian... " << zipfianfy_progress << "%" << std::flush;
+			zipfianfy_progress += 5;
+			zipfianfy_progress_point = 0.01f * zipfianfy_progress * num_queries;
+		}
+	}
+	std::cout << std::endl;
+
+	int num_trials = 100;
+	double *trial_throughputs = new double[num_trials + 1];
+	double *trial_fprates = new double[num_trials + 1];
+	for (int i_trial = 0; i_trial < num_trials; i_trial++) {
+		uint64_t hash_seed = rand();
+		for (i = 0; i < num_queries; i++) {
+			query_set[i] = MurmurHash64A((unsigned char*)(&query_set[i]), sizeof(uint64_t), hash_seed);
+		}
+
+		uint64_t fp_count = 0, value;
+		start_time = clock();
+		for (i = 0; i < num_queries; i++) {
+			if (qf_query(&qf, query_set[i], &value, QF_NO_LOCK)) {
+				ordered_map_t::iterator orig_val = database.find(query_set[i]);
+				if (orig_val == database.end()) {
+					fp_count++;
+				}
+			}
+		}
+		end_time = clock();
+
+		double trial_throughput = (double)num_queries * CLOCKS_PER_SEC / (end_time - start_time);
+		double trial_fprate = (double)fp_count / num_queries;
+		printf("trial %d throughput: %f\n", i_trial + 1, trial_throughput);
+		printf("trial %d fp rate:    %f\n", i_trial + 1, trial_fprate);
+		int ii;
+		for (ii = 0; ii < i_trial; ii++) if (trial_throughputs[ii] > trial_throughput) break;
+		for (int jj = i_trial; jj > ii; jj--) trial_throughputs[jj] = trial_throughputs[jj - 1];
+		trial_throughputs[ii] = trial_throughput;
+		for (ii = 0; ii < i_trial; ii++) if (trial_fprates[ii] > trial_fprate) break;
+		for (int jj = i_trial; jj > ii; jj--) trial_fprates[jj] = trial_fprates[jj - 1];
+		trial_fprates[ii] = trial_fprate;
+	}
+
+	double avg_throughput = 0;
+	for (int ii = 0; ii < num_trials; ii++) avg_throughput += trial_throughputs[ii];
+	avg_throughput /= num_trials;
+	printf("avg throughput: %f\n", avg_throughput);
+	printf("percentile 0:   %f\n", trial_throughputs[0]);
+	printf("percentile 25:  %f\n", trial_throughputs[(int)(0.25f * num_trials)]);
+	printf("percentile 50:  %f\n", trial_throughputs[(int)(0.50f * num_trials)]);
+	printf("percentile 75:  %f\n", trial_throughputs[(int)(0.75f * num_trials)]);
+	printf("percentile 100: %f\n", trial_throughputs[num_trials - 1]);
+
+	double avg_fprate = 0;
+	for (int ii = 0; ii < num_trials; ii++) avg_fprate += trial_fprates[ii];
+	avg_fprate /= num_trials;
+	printf("avg fp rate: %f\n", avg_fprate);
+	printf("percentile 0:   %f\n", trial_fprates[0]);
+	printf("percentile 25:  %f\n", trial_fprates[(int)(0.25f * num_trials)]);
+	printf("percentile 50:  %f\n", trial_fprates[(int)(0.50f * num_trials)]);
+	printf("percentile 75:  %f\n", trial_fprates[(int)(0.75f * num_trials)]);
+	printf("percentile 100: %f\n", trial_fprates[num_trials - 1]);
+
+	printf("throughputs:\t");
+	for (int ii = 0; ii < num_trials; ii++) printf("%f,", trial_throughputs[ii]);
+	printf("\nfprates:\t");
+	for (int ii = 0; ii < num_trials; ii++) printf("%f,", trial_fprates[ii]);
+	printf("\n");
+#else
 	printf("performing %lu queries\n", num_queries);
 	start_time = clock();
 	uint64_t accesses = 0, value;
 	/* Lookup inserted keys and counts. */
 	for (i = 0; i < num_queries; i++) {
 		if (qf_query(&qf, query_set[i], &value, QF_NO_LOCK)) {
-#if USE_UNORDERED_MAP
-			unordered_map_t::iterator orig_key = backing_map.find(query_set[i]);
-#else
-			ordered_map_t::iterator orig_key = backing_map.find(query_set[i]);
-#endif
+			BACKING_MAP_T::iterator orig_key = backing_map.find(query_set[i]);
                         if (orig_key == backing_map.end() || orig_key->first == 0 || orig_key->second != query_set[i]) {
 				accesses++;
 			}
@@ -268,5 +338,6 @@ int main(int argc, char **argv)
 
 	printf("query throughput: %f ops/sec\n", (double)num_queries * CLOCKS_PER_SEC / (end_time - start_time));
 	printf("false positive rate: %f\n", (double)accesses / num_queries);
+#endif
 }
 

@@ -16,7 +16,7 @@ LIBOBJECTS = \
 HEADERS = $(wildcard src/*.h)
 ALIB = libcuckoofilter.a
 
-TEST = test_ext_throughput #test test_fp test_bits test_micro test_fill_varied_throughput
+TEST = test_ext_throughput test_churn #test test_fp test_bits test_micro test_fill_varied_throughput
 
 all: $(TEST)
 
@@ -40,6 +40,9 @@ test_micro: example/test_micro.o $(LIBOBJECTS)
 
 test_ext_throughput: example/test_ext_throughput.o $(LIBOBJECTS)
 	$(CC) example/test_ext_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_churn: example/test_churn.o $(LIBOBJECTS)
+	$(CC) example/test_churn.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
 %.o: %.cc ${HEADERS} Makefile
 	$(CC) $(CFLAGS) $< -o $@

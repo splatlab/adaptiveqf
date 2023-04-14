@@ -311,7 +311,7 @@ extern "C" {
 	void qf_merge(const QF *qfa, const QF *qfb, QF *qfc);
 	void qf_merge_ret(const QF *qfa, const QF *qfb, QF *qfc, uint64_t **coll_hash, int **coll_len, int *col_amt);
 
-	int qf_hash_comp(const QF *qf, const uint64_t hash1, const uint64_t hash2);
+	int qf_hash_cmp(const QF *qf, const uint64_t hash1, const uint64_t hash2);
 	void bulk_insert_sort_hashes(const QF *qf, uint64_t *keys, int nkeys);
 	void qf_bulk_insert(const QF *qf, uint64_t *keys, int nkeys);
 

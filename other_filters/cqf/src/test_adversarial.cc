@@ -249,12 +249,12 @@ int main(int argc, char **argv)
 
 	start_time = clock();
 	/* Lookup inserted keys and counts. */
-	for (i_fp_attack_frequency = 0; i_fp_attack_frequency < 10; i_fp_attack_frequency++) {
+	for (i_fp_attack_frequency = 0; i_fp_attack_frequency < sizeof(fp_attack_frequencies) / sizeof(uint64_t); i_fp_attack_frequency++) {
 		uint64_t fp_attack_frequency = fp_attack_frequencies[i_fp_attack_frequency];
 		uint64_t fp_count = 0, value;
 		start_time = clock();
 		for (i = 0; i < num_queries; i++) {
-			if (i % fp_attack_frequency || !fp_set_len) {
+			if (i % fp_attack_frequency || !fp_set_len || !fp_attack_frequency) {
 				if (qf_query(&qf, query_set[i], &value, QF_NO_LOCK)) {
 #if USE_UNORDERED_MAP
 					unordered_map_t::iterator orig_key = backing_map.find(query_set[i]);

@@ -11,7 +11,11 @@
 #include "singletable.h"
 #include "mirroredtable.h"
 
+#include <stxxl/map>
 #include <stxxl/unordered_map>
+
+#define DATA_NODE_BLOCK_SIZE (4096)
+#define DATA_LEAF_BLOCK_SIZE (4096)
 
 #define SUB_BLOCK_SIZE (8192)
 #define SUB_BLOCKS_PER_BLOCK (256)
@@ -35,7 +39,19 @@ struct CompareGreater {
 };
 //! [comparator]
 
+typedef stxxl::map<uint64_t, uint64_t, CompareGreater, DATA_NODE_BLOCK_SIZE, DATA_LEAF_BLOCK_SIZE> ordered_map_t;
+typedef std::pair<uint64_t, uint64_t> pair_t;
+
 typedef stxxl::unordered_map<uint64_t, uint64_t, HashFunctor, CompareGreater, SUB_BLOCK_SIZE, SUB_BLOCKS_PER_BLOCK> unordered_map_t;
+
+#define USE_UNORDERED_MAP 0
+#if USE_UNORDERED_MAP
+#define BACKING_MAP_T unordered_map_t
+#define BACKING_MAP_INSERT(X, Y, Z) X.insert(std::make_pair(Y, Z))
+#else
+#define BACKING_MAP_T ordered_map_t
+#define BACKING_MAP_INSERT(X, Y, Z) X.insert(pair_t(Y, Z))
+#endif
 
 namespace cuckoofilter {
 // status returned by a cuckoo filter operation
@@ -117,7 +133,7 @@ namespace cuckoofilter {
 					 hash_sels[index / 2] = (char)(n0 | (n1 << 4));
 				 }
 
-				 Status AddImpl(const uint64_t key, unordered_map_t& backing_map);
+				 Status AddImpl(const uint64_t key, BACKING_MAP_T& backing_map);
 
 				 // load factor is the fraction of occupancy
 				 double LoadFactor() const { return 1.0 * Size() / table_->SizeInTags(); }
@@ -143,7 +159,7 @@ namespace cuckoofilter {
 				 ~CuckooFilter() { delete table_; }
 
 				 // Add an item to the filter.
-				 Status Add(const ItemType item, unordered_map_t& backing_map);
+				 Status Add(const ItemType item, BACKING_MAP_T& backing_map);
 
 				 // Report if the item is inserted, with false positive rate.
 				 Status Contain(const ItemType item) const;
@@ -151,10 +167,10 @@ namespace cuckoofilter {
 				 uint64_t ContainReturn(const ItemType item) const;
 
 
-				 Status Adapt(const ItemType item, unordered_map_t& backing_map);
+				 Status Adapt(const ItemType item, BACKING_MAP_T& backing_map);
 
 				 // Delete an key from the filter
-				 Status Delete(const ItemType item);
+				 Status Delete(const ItemType item, BACKING_MAP_T& backing_map);
 
 				 /* methods for providing stats  */
 				 // summary infomation
@@ -168,7 +184,7 @@ namespace cuckoofilter {
 			 };
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Add(const ItemType item, unordered_map_t& backing_map) {
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Add(const ItemType item, BACKING_MAP_T& backing_map) {
 			if (victim_.used) {
 				//victim_.used = false;
 				return NotEnoughSpace;
@@ -178,7 +194,7 @@ namespace cuckoofilter {
 		}
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::AddImpl(const uint64_t key, unordered_map_t& backing_map) {
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::AddImpl(const uint64_t key, BACKING_MAP_T& backing_map) {
 			size_t curindex = GenerateIndexHash(key);
 			uint64_t curkey = key;
 			uint64_t curtag = GenerateTagHash(curkey, curindex);
@@ -187,13 +203,13 @@ namespace cuckoofilter {
 				bool kickout = count > 0;
 				int insert_index = table_->InsertTagToBucket(curindex, curtag, curkey, kickout);
 				if (insert_index > 0) {
-					backing_map.insert(std::make_pair(curindex | (insert_index * table_->NumBuckets()), curkey));
+					BACKING_MAP_INSERT(backing_map, curindex + (insert_index * table_->NumBuckets()), curkey);
 					map_inserts++;
 					num_items_++;
 					return Ok;
 				}
 				insert_index = -insert_index;
-				unordered_map_t::iterator item = backing_map.find(curindex | (insert_index * table_->NumBuckets()));
+				BACKING_MAP_T::iterator item = backing_map.find(curindex + (insert_index * table_->NumBuckets()));
 				map_kickouts++;
 				uint64_t nextkey = item->second;
 				item->second = curkey;
@@ -209,7 +225,7 @@ namespace cuckoofilter {
 		}
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Adapt(const ItemType key, unordered_map_t& backing_map) {
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Adapt(const ItemType key, BACKING_MAP_T& backing_map) {
 			uint64_t i1, i2, index;
 			uint64_t tag1, tag2;
 
@@ -228,7 +244,7 @@ namespace cuckoofilter {
 			IncrHashSel(index);
 			
 			for (size_t j = 0; j < 4; j++) {
-				unordered_map_t::iterator item = backing_map.find(index | (j * table_->NumBuckets()));
+				BACKING_MAP_T::iterator item = backing_map.find(index | (j * table_->NumBuckets()));
 				map_adapts++;
 				if (item == backing_map.end()) continue;
 				table_->UpdateTag(index, j, GenerateTagHash(item->second, index));
@@ -284,28 +300,34 @@ namespace cuckoofilter {
 				(tag2 == victim_.tag && i2 == victim_.index));
 			if (found) return 0;
 			int insert_index;
-			if ((insert_index = table_->FindTagInBucket(i1, tag1))) return i1 | (insert_index * table_->NumBuckets());
-			if ((insert_index = table_->FindTagInBucket(i2, tag2))) return i2 | (insert_index * table_->NumBuckets());
+			if ((insert_index = table_->FindTagInBucket(i1, tag1))) return i1 + (insert_index * table_->NumBuckets());
+			if ((insert_index = table_->FindTagInBucket(i2, tag2))) return i2 + (insert_index * table_->NumBuckets());
 			return 0;
 		}
 
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Delete(const ItemType key) {
-			/*size_t i1, i2;
-			uint64_t tag;
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Delete(const ItemType key, BACKING_MAP_T& backing_map) {
+			size_t i1, i2;
+			uint64_t tag1, tag2;
 
-			GenerateIndexTagHash(key, &i1, &tag);
-			i2 = AltIndex(i1, tag);
+			i1 = GenerateIndexHash(key);
+			tag1 = GenerateTagHash(key, i1);
+			i2 = GenerateAltIndexHash(key, i1);
+			tag2 = GenerateTagHash(key, i2);
 
-			if (table_->DeleteTagFromBucket(i1, tag)) {
+			int j;
+
+			if ((j = table_->DeleteTagFromBucket(i1, tag1)) != 0) {
 				num_items_--;
+				backing_map.erase(i1 + (j * table_->NumBuckets()));
 				goto TryEliminateVictim;
-			} else if (table_->DeleteTagFromBucket(i2, tag)) {
+			} else if ((j = table_->DeleteTagFromBucket(i2, tag2)) != 0) {
 				num_items_--;
+				backing_map.erase(i1 + (j * table_->NumBuckets()));
 				goto TryEliminateVictim;
-			} else if (victim_.used && tag == victim_.tag &&
-					(i1 == victim_.index || i2 == victim_.index)) {
+			} else if (victim_.used && ((tag1 == victim_.tag && i1 == victim_.index) ||
+					(tag2 == victim_.tag && i2 == victim_.index))) {
 				// num_items_--;
 				victim_.used = false;
 				return Ok;
@@ -313,14 +335,11 @@ namespace cuckoofilter {
 				return NotFound;
 			}
 TryEliminateVictim:
-			if (victim_.used) {
+			/*if (victim_.used) {
 				victim_.used = false;
-				size_t i = victim_.index;
-				uint32_t tag = victim_.tag;
-				AddImpl(i, tag);
-			}
-			return Ok;*/
-			return NotFound;
+				AddImpl(key, backing_map);
+			}*/
+			return Ok;
 		}
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>

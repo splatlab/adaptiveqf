@@ -237,15 +237,15 @@ namespace cuckoofilter {
 			}
 		}
 
-		inline bool DeleteTagFromBucket(const size_t i, const uint64_t tag) {
+		inline int DeleteTagFromBucket(const size_t i, const uint64_t tag) {
 			for (size_t j = 0; j < kTagsPerBucket; j++) {
 				if (ReadTag(i, j) == tag) {
 					assert(FindTagInBucket(i, tag) == true);
 					WriteTag(i, j, 0, 0);
-					return true;
+					return j + 1;
 				}
 			}
-			return false;
+			return 0;
 		}
 
 		size_t counter = 0;

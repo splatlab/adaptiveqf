@@ -22,6 +22,7 @@
 #include "include/gqf.h"
 #include "include/gqf_int.h"
 #include "include/gqf_file.h"
+#include "include/hashutil.h"
 
 #include "sglib.h"
 
@@ -290,7 +291,16 @@ int main(int argc, char **argv)
 	printf("running tests on seed %lu\n", seed);
 	srand(seed);
 
-	test_insertions(16, 7);
+	if (argc > 3) {
+		uint64_t key = strtoull(argv[2], NULL, 10);
+		uint64_t mask = (1ULL << atoi(argv[3])) - 1;
+
+		uint64_t hash = hash_64(key, mask);
+		printf("%lu -> %lu\n", key, hash);
+		printf("%lu <- %lu\n", hash_64i(hash, mask), hash);
+	}
+
+	//test_insertions(16, 7);
 	//test_deletions(16, 7);
 	//test_merge(16, 7);
 	//test_merge_2(16, 7);

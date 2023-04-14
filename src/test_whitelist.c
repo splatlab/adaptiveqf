@@ -172,10 +172,10 @@ int insert_key(QF *qf, ilist **htab, uint64_t key, int count, uint8_t flags) {
 }
 
 QF qf;
-int comp(const void *elem1, const void *elem2) {
+int cmp(const void *elem1, const void *elem2) {
 	uint64_t hash1 = *((uint64_t*)elem1);
 	uint64_t hash2 = *((uint64_t*)elem2);
-	return qf_hash_comp(&qf, hash1, hash2);
+	return qf_hash_cmp(&qf, hash1, hash2);
 }
 
 int main(int argc, char **argv)

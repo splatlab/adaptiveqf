@@ -3,12 +3,12 @@ AR = ar
 PREFIX=/usr/local
 
 # Uncomment one of the following to switch between debug and opt mode
-OPT = -DNDEBUG
+OPT = -DNDEBUG -Ofast
 #OPT = -g -ggdb
 
 CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ $(OPT)
 
-LDFLAGS+= -Wall -lpthread -lssl -lcrypto
+LDFLAGS+= -Wall -lpthread -lssl -lcrypto -lstxxl
 
 LIBOBJECTS = \
 	./src/hashutil.o \
@@ -16,7 +16,7 @@ LIBOBJECTS = \
 HEADERS = $(wildcard src/*.h)
 ALIB = libcuckoofilter.a
 
-TEST = test test_hash_accesses
+TEST = test test_hash_accesses test_ext_throughput
 
 all: $(TEST)
 
@@ -28,6 +28,9 @@ test: example/test.o $(LIBOBJECTS)
 
 test_hash_accesses: example/test_hash_accesses.o $(LIBOBJECTS) 
 	$(CC) example/test_hash_accesses.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_ext_throughput: example/test_ext_throughput.o $(LIBOBJECTS) 
+	$(CC) example/test_ext_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
 %.o: %.cc ${HEADERS} Makefile
 	$(CC) $(CFLAGS) $< -o $@
