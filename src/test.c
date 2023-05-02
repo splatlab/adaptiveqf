@@ -281,10 +281,98 @@ int insert_key(QF *qf, ilist **htab, uint64_t key, int count) {
 	return 1;
 }
 
+/*uint64_t MurmurHash64A ( const void * key, int len, unsigned int seed )
+{
+        const uint64_t m = 0xc6a4a7935bd1e995;
+        const int r = 47;
+
+        uint64_t h = seed ^ (len * m);
+
+        const uint64_t * data = (const uint64_t *)key;
+        const uint64_t * end = data + (len/8);
+
+        while(data != end)
+        {
+                uint64_t k = *data++;
+
+                k *= m;
+                k ^= k >> r;
+                k *= m;
+
+                h ^= k;
+                h *= m;
+        }
+
+        const unsigned char * data2 = (const unsigned char*)data;
+
+        switch(len & 7)
+        {
+                case 7: h ^= (uint64_t)data2[6] << 48;
+                case 6: h ^= (uint64_t)data2[5] << 40;
+                case 5: h ^= (uint64_t)data2[4] << 32;
+                case 4: h ^= (uint64_t)data2[3] << 24;
+                case 3: h ^= (uint64_t)data2[2] << 16;
+                case 2: h ^= (uint64_t)data2[1] << 8;
+                case 1: h ^= (uint64_t)data2[0];
+                                                h *= m;
+        };
+
+        h ^= h >> r;
+        h *= m;
+        h ^= h >> r;
+
+        return h;
+}*/
+
+struct _ht_node {
+	uint64_t key;
+	uint64_t tag;
+	struct _ht_node* next;
+} typedef ht_node;
+
+ht_node** ht_init(uint64_t size) {
+	return calloc(size, sizeof(ht_node*));
+}
+
+#define HASH_SET_SEED 26571997
+void ht_insert(ht_node** ht, int len, uint64_t tag, uint64_t key) {
+	uint64_t hash = MurmurHash64A((void*)&tag, sizeof(uint64_t), HASH_SET_SEED) % len;
+	ht_node *node = malloc(sizeof(node));
+	node->key = key;
+	node->tag = tag;
+	node->next = ht[hash];
+	ht[hash] = node;
+}
+
+void ht_free(ht_node** ht, int len) {
+	int i;
+	for (i = 0; i < len; i++) {
+		if (ht[i] == NULL) continue;
+		ht_node *ptr = ht[i];
+		ht_node *next;
+		do {
+			next = ptr->next;
+			free(ptr);
+			ptr = next;
+		} while (ptr != NULL);
+	}
+	free(ht);
+}
 
 int main(int argc, char **argv)
 {
-	uint64_t seed = time(NULL);
+	int ht_len = 1500000;
+	ht_node **ht = ht_init(ht_len);
+
+	int i;
+	for (i = 0; i < 1000000; i++) {
+		uint64_t r = rand();
+		ht_insert(ht, ht_len, r & 0b11111111, r);
+	}
+
+	ht_free(ht, ht_len);
+
+	/*uint64_t seed = time(NULL);
 	if (argc > 1) {
 		seed = strtoull(argv[1], NULL, 10);
 	}
@@ -298,7 +386,7 @@ int main(int argc, char **argv)
 		uint64_t hash = hash_64(key, mask);
 		printf("%lu -> %lu\n", key, hash);
 		printf("%lu <- %lu\n", hash_64i(hash, mask), hash);
-	}
+	}*/
 
 	//test_insertions(16, 7);
 	//test_deletions(16, 7);

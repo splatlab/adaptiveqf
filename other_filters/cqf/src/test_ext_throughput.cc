@@ -339,5 +339,22 @@ int main(int argc, char **argv)
 	printf("query throughput: %f ops/sec\n", (double)num_queries * CLOCKS_PER_SEC / (end_time - start_time));
 	printf("false positive rate: %f\n", (double)accesses / num_queries);
 #endif
+
+	int num_churns = 10000;
+	uint64_t *churn_set = new uint64_t[2 * num_churns];
+	RAND_bytes((unsigned char*)churn_set, 2 * num_churns * sizeof(uint64_t));
+	clock_t churn_start_time = clock(), churn_end_time;
+	for (int ii = 0; ii < num_churns; ii++) {
+		int r = churn_set[2 * ii] % num_inserts;
+		qf_remove(&qf, insert_set[r], 0, 1, QF_NO_LOCK);
+		backing_map.erase(r);
+		database.erase(insert_set[r]);
+		insert_set[r] = churn_set[2 * ii + 1];
+		qf_insert(&qf, insert_set[r], 0, 1, QF_NO_LOCK);
+		backing_map.insert(pair_t(i, insert_set[r]));
+                database.insert(pair_t(insert_set[r], i));
+	}
+	churn_end_time = clock();
+	printf("churn throughput: %f ops/sec\n", (double)num_churns * CLOCKS_PER_SEC / (churn_end_time - churn_start_time));
 }
 

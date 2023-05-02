@@ -1,8 +1,8 @@
 CTARGETS=test test_threadsafe test_pc bm test_throughput test_fill_varied_throughput test_near_full test_deletions test_merge test_hash_accesses test_bulk test_whitelist
-CXXTARGETS=test_ext_throughput test_zipf_throughput test_ext_churn test_adversarial
+CXXTARGETS=test_ext_throughput test_zipf_throughput test_ext_churn test_adversarial taf
 # test_progress
 
-ifdef D
+ifndef D
 	DEBUG=-g
 	OPT=
 else
@@ -108,6 +108,8 @@ test_ext_churn:							$(OBJDIR)/test_ext_churn.o $(OBJDIR)/gqf.o \
 test_adversarial:							$(OBJDIR)/test_adversarial.o $(OBJDIR)/gqf.o \
 										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
+
+taf:									$(OBJDIR)/taf.o $(OBJDIR)/hashutil.o
 
 # dependencies between .o files and .h files
 

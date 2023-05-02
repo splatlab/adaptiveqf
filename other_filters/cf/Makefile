@@ -4,7 +4,7 @@ PREFIX=/usr/local
 
 # Uncomment one of the following to switch between debug and opt mode
 OPT = -DNDEBUG -Ofast
-#OPT = -g -ggdb
+#OPT = -g -ggdb -pg
 
 CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ $(OPT)
 

@@ -168,7 +168,7 @@ typedef struct test_struct {
 	int b;
 } test_struct;
 
-#define USE_UNORDERED_MAP 0
+#define USE_UNORDERED_MAP 1
 #if USE_UNORDERED_MAP
 #define BACKING_MAP_T unordered_map_t
 #define BACKING_MAP_INSERT(X, Y, Z) X.insert(std::make_pair(Y, Z));
@@ -177,7 +177,7 @@ typedef struct test_struct {
 #define BACKING_MAP_INSERT(X, Y, Z) X.insert(pair_t(Y, Z));
 #endif
 
-#define SUB_BLOCK_SIZE 8192
+#define SUB_BLOCK_SIZE 256
 #define SUB_BLOCKS_PER_BLOCK 256
 
 #define DATA_NODE_BLOCK_SIZE (4096)
@@ -291,6 +291,7 @@ int main(int argc, char **argv)
 #if USE_UNORDERED_MAP
 	unordered_map_t backing_map;
 	//backing_map.max_buffer_size(SUB_BLOCK_SIZE);
+	unordered_map_t::allocator_type allocator = backing_map.get_allocator();
 #else
 	ordered_map_t backing_map((ordered_map_t::node_block_type::raw_size) * 3, (ordered_map_t::leaf_block_type::raw_size) * 3);
 #endif	
@@ -327,7 +328,7 @@ int main(int argc, char **argv)
 	clock_t start_time = clock(), end_time, interval_time = start_time;
 	for (i = 0; current_interval != 1./*qf.metadata->noccupied_slots <= target_fill*/; i++) {
 		if (!insert_key(&qf, backing_map, insert_set[i], 1)) break;
-		database.insert(pair_t(insert_set[i], i));
+		//database.insert(pair_t(insert_set[i], i));
 		if (qf.metadata->noccupied_slots >= measure_point) {
                         printf("throughput for interval %f: \t%f\n", current_interval, (double)(i - last_point) * CLOCKS_PER_SEC / (clock() - interval_time));
 			printf("map inserts: %d\tmap_queries: %d\n", map_inserts, map_queries);
@@ -335,6 +336,9 @@ int main(int argc, char **argv)
                         last_point = i;
                         measure_point = nslots * current_interval;
                         interval_time = clock();
+
+			backing_map.print_statistics(std::cout);
+			backing_map.print_load_statistics(std::cout);
                 }
 	}
 	end_time = clock();
@@ -342,6 +346,9 @@ int main(int argc, char **argv)
 	printf("time for inserts:      %f\n", (double)(end_time - start_time) / CLOCKS_PER_SEC);
 	printf("avg insert throughput: %f ops/sec\n", (double)i * CLOCKS_PER_SEC / (end_time - start_time));
 
+
+	backing_map.print_statistics(std::cout);
+	backing_map.print_load_statistics(std::cout);
 
 	// PERFORM QUERIES
 	printf("generating query set of size %lu...\n", num_queries);

@@ -1,5 +1,5 @@
 #compiler
-CC=gcc	
+CC=g++ -std=c++11
 #CC = clang	
 
 #put any desired compilation flags here.  Feel free to remove O2 or change to O3 or Ofast	
