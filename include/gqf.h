@@ -13,6 +13,8 @@
 #include <inttypes.h>
 #include <stdbool.h>
 
+#include "ll_table.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -119,7 +121,7 @@ extern "C" {
 	 * Return value:
 	 *    >= 0: number of keys copied during resizing.
 	 * */
-	int64_t qf_resize_malloc(QF *qf, uint64_t nslots);
+	int qf_resize_malloc(QF *qf, uint64_t nslots);
 
 	/* Turn on automatic resizing.  Resizing is performed by calling
 		 qf_resize_malloc, so the CQF must meet the requirements of that
@@ -144,6 +146,7 @@ extern "C" {
 	int qf_insert(QF *qf, uint64_t key, uint64_t value, uint64_t count, uint8_t
 								flags);
 	int qf_insert_ret(QF *qf, uint64_t key, uint64_t count, uint64_t *ret_index, uint64_t *ret_hash, int *ret_hash_len, uint8_t flags);
+	int qf_insert_using_ll_table(QF *qf, ll_table *table, uint64_t key, uint64_t count, uint8_t flags);
 	int insert_and_extend(QF *qf, uint64_t index, uint64_t key, uint64_t count, uint64_t other_key, uint64_t *ret_hash, uint64_t *ret_other_hash, uint8_t flags);
 
 	/* Set the counter for this key/value pair to count. 

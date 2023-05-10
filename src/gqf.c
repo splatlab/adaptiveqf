@@ -24,6 +24,7 @@
 #include "hashutil.h"
 #include "gqf.h"
 #include "gqf_int.h"
+#include "ll_table.h"
 
 /******************************************************************
  * Code for managing the metadata bits and slots w/o interpreting *
@@ -1293,6 +1294,154 @@ static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_in
 	return 1;
 }
 
+static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, uint8_t runtime_lock) // copy of the insert function for modification
+// hash is 64 hashed key bits concatenated with 64 value bits
+{
+	/* int ret_distance = 0; */
+	uint64_t hash_remainder = hash & BITMASK(qf->metadata->bits_per_slot);
+	uint64_t hash_bucket_index = (hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) >> qf->metadata->bits_per_slot;
+	uint64_t hash_bucket_block_offset = hash_bucket_index % QF_SLOTS_PER_BLOCK;
+	/*uint64_t hash_bucket_lock_offset  = hash_bucket_index % NUM_SLOTS_TO_LOCK;*/
+
+	//if (hash_bucket_index / 64 == 14259) record_break(qf, "insert start", hash_bucket_index / 64, hash_bucket_block_offset);
+	
+	//printf("remainder = %lu   \t index = %lu\n", hash_remainder, hash_bucket_index);
+
+	if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
+		if (!qf_lock(qf, hash_bucket_index, /*small*/ false, runtime_lock))
+			return QF_COULDNT_LOCK;
+	}
+
+	uint64_t runend_index = run_end(qf, hash_bucket_index);
+	int rank_in_family = 0;
+	
+	if (might_be_empty(qf, hash_bucket_index) && runend_index == hash_bucket_index) { /* Empty slot */
+		// If slot is empty, insert new element and then call the function again to increment the counter
+		set_slot(qf, hash_bucket_index, hash_remainder);
+		METADATA_WORD(qf, runends, hash_bucket_index) |= 1ULL << hash_bucket_block_offset;
+		METADATA_WORD(qf, occupieds, hash_bucket_index) |= 1ULL << hash_bucket_block_offset;
+		
+		//modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+		//modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
+		//modify_metadata(&qf->runtimedata->pc_nelts, 1);
+		qf->metadata->ndistinct_elts++;
+		qf->metadata->noccupied_slots++;
+		qf->metadata->nelts++;
+
+		if (count > 1) {
+			insert_and_extend(qf, hash_bucket_index, hash, count - 1, hash, hash, hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
+		}
+		//printf("inserted in slot %lu - empty slot\n", hash_bucket_index);
+	} else { /* Non-empty slot */
+		int64_t runstart_index = hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1;
+
+		if (!is_occupied(qf, hash_bucket_index)) { /* Empty bucket, but its slot is taken. */
+			insert_one_slot(qf, hash_bucket_index, runstart_index, hash_remainder);
+			
+			METADATA_WORD(qf, runends, runstart_index) |= 1ULL << (runstart_index % 64);
+			METADATA_WORD(qf, occupieds, hash_bucket_index) |= 1ULL << hash_bucket_block_offset;
+			//modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+			//modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
+			//modify_metadata(&qf->runtimedata->pc_nelts, count);
+			qf->metadata->ndistinct_elts++;
+			qf->metadata->noccupied_slots++;
+			qf->metadata->nelts++;
+
+			if (count > 1) insert_and_extend(qf, hash_bucket_index, hash, count - 1, hash, hash, hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash is a placeholders
+		} else { /* Non-empty bucket */
+
+			/* uint64_t current_remainder, current_count, current_end; */
+			uint64_t current_index = runstart_index;
+			uint64_t current_remainder;
+
+			uint64_t count_info;
+			int count_slots;
+			// Find a matching item in the filter, if one exists
+			//while (is_extension_or_counter(qf, current_index)) current_index++;
+			assert(!is_extension_or_counter(qf, current_index));
+			int was_runend = 0;
+			uint64_t insert_index;
+			do {
+				current_remainder = get_slot(qf, current_index);
+				if (current_remainder >= hash_remainder) {
+					insert_index = current_index;
+					break;
+				}
+				else if (is_runend(qf, current_index)) {
+					was_runend = 1;
+					insert_index = current_index + 1;
+					while (is_extension_or_counter(qf, insert_index)) insert_index++;
+					break;
+				}
+				else {
+					current_index++;
+					while (is_extension_or_counter(qf, current_index)) current_index++;
+					rank_in_family++;
+				}
+			} while (current_index < qf->metadata->xnslots);
+			if (current_index >= qf->metadata->xnslots) {
+				printf("error: program reached end of filter without finding runend\n");
+				return QF_NO_SPACE;
+			}
+
+			insert_one_slot(qf, hash_bucket_index, insert_index, hash_remainder);
+			if (was_runend) {
+				METADATA_WORD(qf, runends, insert_index) |= (1ULL << (insert_index % QF_SLOTS_PER_BLOCK));
+				METADATA_WORD(qf, runends, current_index) ^= (1ULL << (current_index % QF_SLOTS_PER_BLOCK));
+			}
+			
+			//modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+			//modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
+			//modify_metadata(&qf->runtimedata->pc_nelts, count);
+			qf->metadata->ndistinct_elts++;
+			qf->metadata->noccupied_slots++;
+			qf->metadata->nelts++;
+
+			if (count > 1) insert_and_extend(qf, insert_index, hash, count - 1, hash, hash, hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
+		}
+	}
+
+	if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
+		qf_unlock(qf, hash_bucket_index, /*small*/ false);
+	}
+
+	return rank_in_family;
+}
+
+int qf_insert_using_ll_table(QF *qf, ll_table* table, uint64_t key, uint64_t count, uint8_t flags)
+{
+	// We fill up the CQF up to 95% load factor.
+	// This is a very conservative check.
+	//if (qf_get_num_occupied_slots(qf) >= qf->metadata->nslots * 0.95) {
+	if (qf->metadata->noccupied_slots >= qf->metadata->nslots * 0.95) {
+		if (qf->runtimedata->auto_resize) {
+			/*fprintf(stdout, "Resizing the CQF.\n");*/
+			if (qf->runtimedata->container_resize(qf, qf->metadata->nslots * 2) < 0)
+			{
+				fprintf(stderr, "Resizing failed.\n");
+				return QF_NO_SPACE;
+			}
+		} else {
+			return QF_NO_SPACE;
+		}
+	}
+	if (count == 0)
+		return 0;
+
+	if (GET_KEY_HASH(flags) != QF_KEY_IS_HASH) {
+		if (qf->metadata->hash_mode == QF_HASH_DEFAULT)
+			key = MurmurHash64A(((void *)&key), sizeof(key), qf->metadata->seed);
+		else if (qf->metadata->hash_mode == QF_HASH_INVERTIBLE)
+			key = hash_64(key, -1ULL);
+	}
+	//uint64_t hash = ((key << qf->metadata->value_bits) | (value & BITMASK(qf->metadata->value_bits)));// % qf->metadata->range;
+	uint64_t hash = key;
+	
+	int ret = insert_using_ll_table(qf, hash, count, flags);
+	if (ret >= 0) ll_table_insert(table, hash, ret, key);
+	return ret;
+}
+
 int insert_and_extend(QF *qf, uint64_t index, uint64_t key, uint64_t count, uint64_t other_key, uint64_t *ret_hash, uint64_t *ret_other_hash, uint8_t flags)
 {
 	if (GET_NO_LOCK(flags) != QF_NO_LOCK) {
@@ -1579,14 +1728,14 @@ bool qf_malloc(QF *qf, uint64_t nslots, uint64_t key_bits, uint64_t
 																		 hash, seed, NULL, 0);
 
 	void *buffer = malloc(total_num_bytes);
-	printf("allocated %lu for total_num_bytes\n", total_num_bytes);
+	//printf("allocated %lu for total_num_bytes\n", total_num_bytes);
 	if (buffer == NULL) {
 		perror("Couldn't allocate memory for the CQF.");
 		exit(EXIT_FAILURE);
 	}
 
 	qf->runtimedata = (qfruntime *)calloc(sizeof(qfruntime), 1);
-	printf("allocated %lu for runtimedata\n", sizeof(qfruntime));
+	//printf("allocated %lu for runtimedata\n", sizeof(qfruntime));
 	if (qf->runtimedata == NULL) {
 		perror("Couldn't allocate memory for runtime data.");
 		exit(EXIT_FAILURE);
@@ -1642,7 +1791,7 @@ void qf_reset(QF *qf)
 #endif
 }
 
-int64_t qf_resize_malloc(QF *qf, uint64_t nslots)
+/*int64_t qf_resize_malloc(QF *qf, uint64_t nslots)
 {
 	printf("malloc\n");
 	QF new_qf;
@@ -1673,7 +1822,7 @@ int64_t qf_resize_malloc(QF *qf, uint64_t nslots)
 	memcpy(qf, &new_qf, sizeof(QF));
 
 	return ret_numkeys;
-}
+}*/
 
 uint64_t qf_resize(QF* qf, uint64_t nslots, void* buffer, uint64_t buffer_len)
 {
@@ -1978,6 +2127,50 @@ int qf_adapt(QF *qf, uint64_t index, uint64_t key, uint64_t other_key, uint64_t 
 	return ret;
 }
 
+int qf_adapt_using_ll_table(QF *qf, ll_table *table, uint64_t fp_key, uint8_t flags) {
+	uint64_t hash = fp_key;
+	if (GET_KEY_HASH(flags) != QF_KEY_IS_HASH) {
+		if (qf->metadata->hash_mode == QF_HASH_DEFAULT) {
+			hash = MurmurHash64A(((void *)&fp_key), sizeof(fp_key), qf->metadata->seed);
+		}
+		else if (qf->metadata->hash_mode == QF_HASH_INVERTIBLE) {
+			hash = hash_64(fp_key, -1ULL);
+		}
+	}
+
+	uint64_t hash_remainder = hash & BITMASK(qf->metadata->bits_per_slot);
+	uint64_t hash_bucket_index = (hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+	if (!is_occupied(qf, hash_bucket_index)) return 0;
+	
+	uint64_t current_index = hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1;
+	int rank_in_family = 0;
+
+	uint64_t count_info, hash_info;
+	int count_slots, hash_slots;
+	do {
+		if (get_slot(&qf, current_index) < hash_remainder) {
+			while (is_extension_or_counter(qf, ++current_index));
+		}
+		else if (get_slot(&qf, current_index) == hash_remainder) {
+			get_slot_info(qf, current_index, &hash_info, &hash_slots, &count_info, &count_slots);
+
+			if (hash_info == ((hash >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) & BITMASK(hash_slots * qf->metadata->bits_per_slot))) {
+				uint64_t *orig_key = ll_table_query(table, hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot), rank_in_family);
+				qf_adapt(qf, current_index, *orig_key, fp_key, &hash_info, flags);
+
+				return 1;
+			}
+
+			if (is_runend(qf, current_index)) break;
+			current_index += count_slots + hash_slots + 1;
+			rank_in_family++;
+		}
+		else break;
+	} while (current_index < qf->metadata->xnslots);
+
+	return 0;
+}
+
 
 enum qf_hashmode qf_get_hashmode(const QF *qf) {
 	return qf->metadata->hash_mode;
@@ -2155,6 +2348,12 @@ int64_t qf_iterator_from_key_value(const QF *qf, QFi *qfi, uint64_t key,
 	return qfi->current;
 }
 
+// TODO: the current schema uses ext_len to indicate the number of slots used for extensions.
+// I want to eventually change this mean the number of bits in the extension.
+// This will allow qf_resize_malloc to more smartly allocate the proper number of slots for an extension in the new filter.
+// eg. If a filter with 4 rbits goes to 3 rbits, and an item has 3 extensions,
+//     the current system will see there are 3 extension slots, and the resulting fingerprint will too, dropping 3 bits.
+//     However, if ext_len is known to be 12, the 3 dropped bits could be put in a new extension, losing no bits.
 static inline int qfi_get(const QFi *qfi, uint64_t *rem, uint64_t *ext, int *ext_len, uint64_t *count)
 {
 	if (qfi_end(qfi)) return QFI_INVALID;
@@ -2290,6 +2489,42 @@ static inline uint64_t _merge_insert(QF *qf, uint64_t index, uint64_t run, uint6
 		}
 	}
 	return current;
+}
+
+int qf_resize_malloc(QF *qf, uint64_t nslots) {
+	if (qf->metadata->nslots > nslots) return 0; // not yet supporting resizing to make smaller, because requires extra information for extensions
+
+	QF new_qf;
+	if (!qf_malloc(&new_qf, nslots, qf->metadata->key_bits, qf->metadata->value_bits, qf->metadata->hash_mode, qf->metadata->seed)) return 0;
+	if (qf->runtimedata->auto_resize) qf_set_auto_resize(&new_qf, true);
+
+	uint64_t current_run = 0;
+	uint64_t current_index = 0;
+	uint64_t last_index = -1;
+
+	QFi qfi;
+	qf_iterator_from_position(qf, &qfi, 0);
+
+	uint64_t rem, ext, count;
+	int extlen;
+	qfi_get_hash(&qfi, &rem, &ext, &extlen, &count);
+	if (qfi.run == 0) METADATA_WORD(&new_qf, occupieds, 0) |= 1;
+	while (!qfi_end(&qfi)) {
+		if (qfi.run != current_run) {
+			if (last_index != -1) METADATA_WORD(&new_qf, runends, last_index) |= (1ULL << (last_index % QF_SLOTS_PER_BLOCK));
+			current_run = qfi.run;
+			METADATA_WORD(&new_qf, occupieds, current_run) |= (1ULL << (current_run % QF_SLOTS_PER_BLOCK));
+			if (current_index < current_run) current_index = current_run;
+		}
+		last_index = current_index;
+		current_index = _merge_insert(qf, current_index, current_run, rem, ext, extlen, count);
+	}
+	if (last_index != -1) METADATA_WORD(qf, runends, last_index) |= (1ULL << (last_index % QF_SLOTS_PER_BLOCK));
+
+	qf_free(qf);
+	memcpy(qf, &new_qf, sizeof(QF));
+
+	return 1;
 }
 
 
