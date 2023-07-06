@@ -7,7 +7,6 @@
  * ============================================================================
  */
 
-extern "C" {
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
@@ -23,26 +22,32 @@ extern "C" {
 #include "include/gqf_int.h"
 #include "include/gqf_file.h"
 #include "include/hashutil.h"
-}
 
-#include <ctime>
-#include <stxxl/unordered_map>
-#include <stxxl/map>
+#include <splinterdb/splinterdb.h>
+#include <splinterdb/data.h>
+#include <splinterdb/public_platform.h>
+#include <splinterdb/default_data_config.h>
 
-int bp2() {
-	return 0;
+
+#define Kilo (1024UL)
+#define Mega (1024UL * Kilo)
+#define Giga (1024UL * Mega)
+
+#define TEST_DB_NAME "db"
+
+#define MAX_KEY_SIZE sizeof(uint64_t)
+#define MAX_VAL_SIZE sizeof(uint64_t)
+
+void bp2() {
+	return;
 }
 
 uint64_t rand_uniform(uint64_t max) {
-	/*if (max <= RAND_MAX) return rand() % max;
+	if (max <= RAND_MAX) return rand() % max;
 	uint64_t a = rand();
 	uint64_t b = rand();
-	a |= (b << 32);
-	return a % max;*/
-	uint64_t a;
-	RAND_bytes((unsigned char*)(&a), sizeof(uint64_t));
-	if (max) a %= max;
-	return a;
+	a |= (b << 31);
+	return a % max;
 }
 
 double rand_normal(double mean, double sd) {
@@ -73,75 +78,6 @@ double rand_zipfian(double s, double max) {
 	}
 }
 
-#define HASH_SET_SEED 26571997
-
-struct _set_node {
-        struct _set_node *next;
-        uint64_t key;
-	uint64_t rem;
-	int len;
-} typedef set_node;
-
-int set_insert(set_node *set, int set_len, set_node *new_node) {
-        uint64_t hash = MurmurHash64A((void*)(&(new_node->key)), sizeof(new_node->key), HASH_SET_SEED);
-        set_node *ptr = &set[hash % set_len];
-        if (!ptr->key) {
-                ptr->key = new_node->key;
-        } else {
-                while (ptr->next) {
-                        if (ptr->key == new_node->key) {
-                                return 0;
-                        }
-                        ptr = ptr->next;
-                }
-                if (ptr->key == new_node->key) {
-                        return 0;
-                }
-                ptr->next = new_node;
-        }
-        return 1;
-}
-
-int set_query(set_node *set, int set_len, uint64_t key) {
-        uint64_t hash = MurmurHash64A((void*)(&key), sizeof(key), HASH_SET_SEED);
-        set_node *ptr = &set[hash % set_len];
-        if (!ptr->key) {
-                return 0;
-        } else {
-                while (ptr->next){
-                        if (ptr->key == key) {
-                                return 1;
-                        }
-                        ptr = ptr->next;
-                }
-                if (ptr->key == key){
-                        return 1;
-                } else {
-                        return 0;
-                }
-        }
-}
-
-set_node *set_get(set_node *set, int set_len, set_node *node) {
-        uint64_t hash = MurmurHash64A((void*)(&(node->key)), sizeof(node->key), HASH_SET_SEED);
-        set_node *ptr = &set[hash % set_len];
-        if (!ptr->key) {
-                return NULL;
-        } else {
-                while (ptr->next){
-                        if (ptr->key == node->key) {
-                                return ptr;
-                        }
-                        ptr = ptr->next;
-                }
-                if (ptr->key == node->key){
-                        return ptr;
-                } else {
-                        return NULL;
-                }
-        }
-}
-
 uint64_t hash_str(char *str) {
 	uint64_t hash = 5381;
 	int c;
@@ -163,56 +99,32 @@ void csv_get(char* buffer, int col) {
 }
 
 
-typedef struct test_struct {
-	int a;
-	int b;
-} test_struct;
-
-#define USE_UNORDERED_MAP 1
-#if USE_UNORDERED_MAP
-#define BACKING_MAP_T unordered_map_t
-#define BACKING_MAP_INSERT(X, Y, Z) X.insert(std::make_pair(Y, Z));
-#else
-#define BACKING_MAP_T ordered_map_t
-#define BACKING_MAP_INSERT(X, Y, Z) X.insert(pair_t(Y, Z));
-#endif
-
-#define SUB_BLOCK_SIZE 256
-#define SUB_BLOCKS_PER_BLOCK 256
-
-#define DATA_NODE_BLOCK_SIZE (4096)
-#define DATA_LEAF_BLOCK_SIZE (4096)
-
-//! [hash]
-struct HashFunctor
-{
-	size_t operator () (int key) const {
-		return (size_t)(key * 2654435761u);
-	}
-};
-//! [hash]
-
-//! [comparator]
-struct CompareGreater {
-	bool operator () (const uint64_t& a, const uint64_t& b) const {
-		return a > b;
-	}
-	static uint64_t max_value() {
-		return 0ULL;
-	}
-};
-//! [comparator]
-
-typedef stxxl::map<uint64_t, test_struct, CompareGreater, DATA_NODE_BLOCK_SIZE, DATA_LEAF_BLOCK_SIZE> map_t2;
-
-typedef stxxl::unordered_map<uint64_t, uint64_t, HashFunctor, CompareGreater, SUB_BLOCK_SIZE, SUB_BLOCKS_PER_BLOCK> unordered_map_t;
-typedef stxxl::map<uint64_t, uint64_t, CompareGreater, DATA_NODE_BLOCK_SIZE, DATA_LEAF_BLOCK_SIZE> ordered_map_t;
-typedef std::pair<uint64_t, uint64_t> pair_t;
-
 int map_inserts = 0;
 int map_queries = 0;
 
-int insert_key(QF *qf, BACKING_MAP_T& map, uint64_t key, int count) {
+int db_init(splinterdb **database, const char *db_name, uint64_t cache_size, uint64_t disk_size) {
+        data_config data_cfg;
+        default_data_config_init(MAX_KEY_SIZE, &data_cfg);
+        splinterdb_config splinterdb_cfg = (splinterdb_config){
+                .filename   = db_name,
+                .cache_size = cache_size,
+                .disk_size  = disk_size,
+                .data_cfg   = &data_cfg
+        };
+
+        return splinterdb_create(&splinterdb_cfg, database);
+}
+
+int db_insert(splinterdb *database, const void *key_data, const void *val_data) {
+	slice key = slice_create(MAX_KEY_SIZE, (char*)key_data);
+	slice val = slice_create(MAX_VAL_SIZE, (char*)val_data);
+
+	return splinterdb_insert(database, key, val);
+}
+
+splinterdb_lookup_result db_result;
+splinterdb_lookup_result bm_result;
+int insert_key(QF *qf, splinterdb *bm, uint64_t key, int count) {
         uint64_t ret_index, ret_hash, ret_other_hash;
         int ret_hash_len;
         int ret = qf_insert_ret(qf, key, count, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH);
@@ -220,30 +132,41 @@ int insert_key(QF *qf, BACKING_MAP_T& map, uint64_t key, int count) {
                 return 0;
         }
         else if (ret == 0) {
-		BACKING_MAP_T::iterator item = map.find(ret_hash | (1 << ret_hash_len));
+		uint64_t fingerprint_data = ret_hash | (1 << ret_hash_len);
+		slice fingerprint = slice_create(sizeof(uint64_t), (char*)(&fingerprint_data));
+		splinterdb_lookup(bm, fingerprint, &bm_result);
 		map_queries++;
-                if (item == map.end()) {
+                if (!splinterdb_lookup_found(&bm_result)) {
                         printf("error:\tfilter claimed to have fingerprint %lu but hashtable could not find it\n", ret_hash);
                 }
-                else if (item->second == key) {
-                        insert_and_extend(qf, ret_index, key, count, key, &ret_hash, &ret_other_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
-                }
-                else {
-                        int ext_len = insert_and_extend(qf, ret_index, key, count, item->second, &ret_hash, &ret_other_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
-                        if (ext_len == QF_NO_SPACE) {
-                                printf("filter is full after insert_and_extend\n");
-                                return 0;
-                        }
+		else {
+			slice result_val;
+			splinterdb_lookup_result_value(&bm_result, &result_val);
+			if (memcmp(slice_data(result_val), &key, sizeof(uint64_t)) == 0) {
+				insert_and_extend(qf, ret_index, key, count, key, &ret_hash, &ret_other_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
+			}
+			else {
+				uint64_t orig_key;
+				memcpy(&orig_key, slice_data(result_val), sizeof(uint64_t));
+				int ext_len = insert_and_extend(qf, ret_index, key, count, orig_key, &ret_hash, &ret_other_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
+				if (ext_len == QF_NO_SPACE) {
+					printf("filter is full after insert_and_extend\n");
+					return 0;
+				}
 
-			map.erase(item);
-			BACKING_MAP_INSERT(map, ret_other_hash | (1 << ret_hash_len), item->second);
-			BACKING_MAP_INSERT(map, ret_hash | (1 << ret_hash_len), key);
-			map_inserts++;
-			map_inserts++;
+				splinterdb_delete(bm, result_val);
+				uint64_t temp = ret_other_hash | (1 << ret_hash_len);
+				db_insert(bm, &temp, slice_data(result_val));
+				temp = ret_hash | (1 << ret_hash_len);
+				db_insert(bm, &temp, &key);
+				map_inserts++;
+				map_inserts++;
+			}
                 }
         }
         else if (ret == 1) {
-		BACKING_MAP_INSERT(map, ret_hash | (1 << ret_hash_len), key);
+		uint64_t temp = ret_hash | (1 << ret_hash_len);
+		db_insert(bm, &temp, &key);
 		map_inserts++;
         }
         else {
@@ -288,14 +211,12 @@ int main(int argc, char **argv)
 
 
 	printf("initializing hash table...\n");
-#if USE_UNORDERED_MAP
-	unordered_map_t backing_map;
-	//backing_map.max_buffer_size(SUB_BLOCK_SIZE);
-	unordered_map_t::allocator_type allocator = backing_map.get_allocator();
-#else
-	ordered_map_t backing_map((ordered_map_t::node_block_type::raw_size) * 3, (ordered_map_t::leaf_block_type::raw_size) * 3);
-#endif	
-	ordered_map_t database((ordered_map_t::node_block_type::raw_size) * 3, (ordered_map_t::leaf_block_type::raw_size) * 3);
+	/*splinterdb *database;
+	db_init(&database, "db", 64 * Mega, 128 * Mega);
+	splinterdb_lookup_result_init(database, &db_result, 0, NULL);*/
+	splinterdb *backing_map;
+	db_init(&backing_map, "bm", 64 * Mega, 128 * Mega);
+	splinterdb_lookup_result_init(backing_map, &bm_result, 0, NULL);
 	
 
 	printf("initializing filter...\n");
@@ -309,8 +230,11 @@ int main(int argc, char **argv)
 
 	printf("generating insert set of size %lu...\n", num_inserts);
 	uint64_t i, j;
-	uint64_t *insert_set = new uint64_t[num_inserts];
-        RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
+	uint64_t *insert_set = malloc(num_inserts * sizeof(uint64_t));
+        //RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
+	for (i = 0; i < num_inserts; i++) {
+		insert_set[i] = rand_uniform(-1);
+	}
 
 
 	// PERFORM INSERTS
@@ -330,8 +254,10 @@ int main(int argc, char **argv)
 	clock_t start_time = clock(), end_time, interval_time = start_time;
 	for (i = 0; qf.metadata->noccupied_slots < target_fill; i++) {
 		if (!insert_key(&qf, backing_map, insert_set[i], 1)) break;
-		database.insert(pair_t(insert_set[i], i));
+		//db_insert(database, &insert_set[i], &i);
 		printf("\rperforming insertions... %lu/%lu          ", qf.metadata->noccupied_slots, target_fill);
+		fflush(stdout);
+		if (qf.metadata->noccupied_slots == 623) bp2();
 		if (qf.metadata->noccupied_slots >= measure_point) {
 			//std::cout << "\rperforming insertions... " << current_interval * 100 << "%%         " << std::flush;
 			fprintf(outfp, "%f\t%f\n", (double)qf.metadata->noccupied_slots / nslots, (double)(i - last_point) * CLOCKS_PER_SEC / (clock() - interval_time));
@@ -375,19 +301,27 @@ int main(int argc, char **argv)
 
 	uint64_t fp_count = 0;
 	start_time = clock();
-	for (i = 0; i < num_queries; i++) {
+	/*for (i = 0; i < num_queries; i++) {
 		j = query_set[i];
 
 		if (qf_query(&qf, j, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH)) {
-			ordered_map_t::iterator item = database.find(j);
-			if (item == database.end()) {
+			slice query = slice_create(sizeof(uint64_t), (char*)(&j));
+			splinterdb_lookup(database, query, &db_result);
+			if (!splinterdb_lookup_found(&db_result)) {
 				fp_count++;
 				if (still_have_space) {
-					BACKING_MAP_T::iterator orig_key = backing_map.find(ret_hash | (1 << ret_hash_len));
-					ret_hash_len = qf_adapt(&qf, ret_index, orig_key->second, j, &ret_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
+					uint64_t fingerprint_data = ret_hash | (1 << ret_hash_len);
+					slice fingerprint = slice_create(sizeof(uint64_t), (char*)(&fingerprint_data));
+					splinterdb_lookup(backing_map, fingerprint, &bm_result);
+					slice result_val;
+					splinterdb_lookup_result_value(&bm_result, &result_val);
+					uint64_t orig_key;
+					memcpy(&orig_key, slice_data(result_val), sizeof(uint64_t));
+					ret_hash_len = qf_adapt(&qf, ret_index, orig_key, j, &ret_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
 					if (ret_hash_len > 0) {
-						backing_map.erase(orig_key);
-						backing_map.insert(std::make_pair(ret_hash | (1 << ret_hash_len), orig_key->second));
+						splinterdb_delete(backing_map, result_val);
+						uint64_t temp = ret_hash | (1 << ret_hash_len);
+						db_insert(backing_map, &temp, &orig_key);
 					}
 					else if (ret_hash_len == QF_NO_SPACE) {
 						still_have_space = 0;
@@ -404,7 +338,7 @@ int main(int argc, char **argv)
                         interval_time = clock();
                 }
 
-	}
+	}*/
 	end_time = clock();
 	printf("\rperforming queries... 100%%           \n");
 

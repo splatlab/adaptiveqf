@@ -7,10 +7,33 @@
 #include <iostream>
 #include <vector>
 #include <openssl/rand.h>
-#include <stxxl/unordered_map>
-#include <stxxl/map>
+
+#include <splinterdb/splinter.h>
+#include <splinterdb/data.h>
+#include <splinterdb/public_platform.h>
+#include <splinterdb/default_data_config.h>
 
 using cuckoofilter::CuckooFilter;
+
+int db_init(splinterdb **database, const char *db_name, uint64_t cache_size, uint64_t disk_size) {
+        data_config data_cfg;
+        default_data_config_init(MAX_KEY_SIZE, &data_cfg);
+        splinterdb_config splinterdb_cfg = (splinterdb_config){
+                .filename   = db_name,
+                .cache_size = cache_size,
+                .disk_size  = disk_size,
+                .data_cfg   = &data_cfg
+        };
+
+        return splinterdb_create(&splinterdb_cfg, database);
+}
+
+int db_insert(splinterdb *database, const void *key_data, const void *val_data) {
+        slice key = slice_create(MAX_KEY_SIZE, (char*)key_data);
+        slice val = slice_create(MAX_VAL_SIZE, (char*)val_data);
+
+        return splinterdb_insert(database, key, val);
+}
 
 int main(int argc, char **argv) {
 	uint64_t seed;
@@ -44,13 +67,11 @@ int main(int argc, char **argv) {
 	//   CuckooFilter<size_t, 13, cuckoofilter::PackedTable> filter(total_items);
 	printf("initializing data structures...\n");
 	CuckooFilter<size_t, 8> filter(total_inserts);
-#if USE_UNORDERED_MAP
-	unordered_map_t backing_map;
-	//backing_map.max_buffer_size(SUB_BLOCK_SIZE);
-#else
-	ordered_map_t backing_map((ordered_map_t::node_block_type::raw_size) * 3, (ordered_map_t::leaf_block_type::raw_size) * 3);
-#endif
-	ordered_map_t database((ordered_map_t::node_block_type::raw_size) * 3, (ordered_map_t::leaf_block_type::raw_size) * 3);
+
+	splinterdb *backing_map;
+        db_init(&backing_map, "bm", 64 * Mega, 128 * Mega);
+	splinterdb_lookup_result bm_result;
+        splinterdb_lookup_result_init(backing_map, &bm_result, 0, NULL);
 
 	printf("generating inserts...\n");
 	uint64_t *inserts = new uint64_t[total_inserts];

@@ -80,28 +80,42 @@
 //ilist hash_space[1 << 20];
 //int hash_space_used = 0;
 
-int main(int argc, char **argv)
-{
-	int pbits = 20;
+int main(int argc, char **argv) {
+	uint64_t seed;
+	if (argc > 1) {
+		seed = strtoull(argv[1], NULL, 10);
+	}
+	else {
+		seed = time(NULL);
+	}
+	printf("running test on seed %lu\n", seed);
+	srand(seed);
+
+	uint64_t pbits = 20;
+	uint64_t starting_qbits = 8;
 
 	QF qf;
-	if (!qf_malloc(&qf, 1ULL << 8, 20, 0, QF_HASH_INVERTIBLE, 0)) {
+	if (!qf_malloc(&qf, 1ULL << starting_qbits, pbits, 0, QF_HASH_INVERTIBLE, 0)) {
 		fprintf(stderr, "Can't allocate CQF.\n");
 		abort();
 	}
-	qf_set_auto_resize(&qf, false);
+	qf_set_auto_resize(&qf, true);
 
 	uint64_t ret_index, ret_hash;
 	int ret_hash_len;
 
 	ll_table table;
-	ll_table_init(&table, 1ULL << 12);
+	ll_table_init(&table, 1ULL << starting_qbits);
 
 	uint64_t keya = rand(), keyb = rand(), keyc = rand();
 
 	qf_insert_using_ll_table(&qf, &table, keya, 1, QF_NO_LOCK);
+	qf_insert_using_ll_table(&qf, &table, keyb, 1, QF_NO_LOCK);
+	qf_insert_using_ll_table(&qf, &table, keyc, 1, QF_NO_LOCK);
 
 	assert(qf_query(&qf, keya, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK) > 0);
+	assert(qf_query(&qf, keyb, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK) > 0);
+	assert(qf_query(&qf, keyc, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK) > 0);
 
 	qf_free(&qf);
 

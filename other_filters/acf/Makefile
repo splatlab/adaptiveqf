@@ -8,7 +8,7 @@ OPT = -DNDEBUG -Ofast #-pg
 
 CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ $(OPT)
 
-LDFLAGS+= -Wall -lpthread -lssl -lcrypto -lstxxl #-pg
+LDFLAGS+= -Wall -lpthread -lssl -lcrypto -lstxxl -lsplinterdb
 
 LIBOBJECTS = \
 	./src/hashutil.o \

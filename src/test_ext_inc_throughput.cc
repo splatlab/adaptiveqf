@@ -256,13 +256,13 @@ int insert_key(QF *qf, BACKING_MAP_T& map, uint64_t key, int count) {
 
 int main(int argc, char **argv)
 {
-	if (argc < 5) {
-		fprintf(stderr, "Please specify \nthe log of the number of slots in the QF [eg. 20]\nthe number of remainder bits in the QF [eg. 9]\nthe number of queries [eg. 1000000]\nthe output file [eg. disk_throughput_stats.txt]\n");
-		// ./test 16 7 $((1 << 15)) 1000000 disk_throughput_stats.txt 0
+	if (argc < 4) {
+		fprintf(stderr, "Please specify \nthe log of the number of slots in the QF\nthe number of remainder bits in the QF\nthe number of queries\n");
+		// ./test 16 7 $((1 << 15)) 1000000 0
 		exit(1);
 	}
-	if (argc >= 6) {
-		srand(strtol(argv[5], NULL, 10));
+	if (argc >= 5) {
+		srand(strtol(argv[4], NULL, 10));
 		printf("running test on seed %ld\n", strtol(argv[5], NULL, 10));
 	}
 	else {
@@ -311,106 +311,69 @@ int main(int argc, char **argv)
 	uint64_t i, j;
 	uint64_t *insert_set = new uint64_t[num_inserts];
         RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
+	uint64_t *query_set = (uint64_t*)calloc(num_queries, sizeof(uint64_t));
 
 
 	// PERFORM INSERTS
-	uint64_t target_fill = nslots * load_factor;
-	printf("performing insertions... 0/%lu", target_fill);
-	//std::cout << "performing insertions... 0%%" << std::flush;
+	printf("performing inserts...\n");
 	uint64_t ret_index, ret_hash;
 	int ret_hash_len;
 
-	double measure_interval = 0.01f;
+	uint64_t target_fill = nslots * load_factor;
+
+	double measure_interval = 0.05f;
         double current_interval = measure_interval;
-        uint64_t measure_point = target_fill * current_interval, last_point = 0;
-
-	FILE *outfp = fopen(argv[4], "w");
-	fprintf(outfp, "./test_ext_throughput %s %s %s %s\n", argv[1], argv[2], argv[3], argv[4]);
-
-	clock_t start_time = clock(), end_time, interval_time = start_time;
-	for (i = 0; qf.metadata->noccupied_slots < target_fill; i++) {
-		if (!insert_key(&qf, backing_map, insert_set[i], 1)) break;
-		database.insert(pair_t(insert_set[i], i));
-		printf("\rperforming insertions... %lu/%lu          ", qf.metadata->noccupied_slots, target_fill);
-		if (qf.metadata->noccupied_slots >= measure_point) {
-			//std::cout << "\rperforming insertions... " << current_interval * 100 << "%%         " << std::flush;
-			fprintf(outfp, "%f\t%f\n", (double)qf.metadata->noccupied_slots / nslots, (double)(i - last_point) * CLOCKS_PER_SEC / (clock() - interval_time));
-                        current_interval += measure_interval;
-                        last_point = i;
-                        measure_point = nslots * current_interval;
-                        interval_time = clock();
-
-			//backing_map.print_statistics(std::cout);
-			//backing_map.print_load_statistics(std::cout);
-                }
-	}
-	end_time = clock();
-	printf("\rperforming insertions... %lu/%lu          \n", target_fill, target_fill);
-	//std::cout << "\rperforming insertions... 100%%         " << std::endl;
-	fprintf(outfp, "%f\t%f\n", (double)target_fill / nslots, (double)(i - last_point) * CLOCKS_PER_SEC / (end_time - interval_time));
-	fclose(outfp);
-
-	printf("time for inserts:      %f\n", (double)(end_time - start_time) / CLOCKS_PER_SEC);
-	printf("avg insert throughput: %f ops/sec\n", (double)i * CLOCKS_PER_SEC / (end_time - start_time));
-
-
-	//backing_map.print_statistics(std::cout);
-	//backing_map.print_load_statistics(std::cout);
-
-	// PERFORM QUERIES
-	printf("\ngenerating query set of size %lu...\n", num_queries);
+        uint64_t measure_point = nslots * current_interval, last_point = 0;
 	int still_have_space = 1;
-	if (qf.metadata->noccupied_slots >= qf.metadata->nslots * 0.95) {
-		still_have_space = 0;
-		printf("filter is full; skipping query adaptations\n");
-	}
 
-	uint64_t *query_set = (uint64_t*)calloc(num_queries, sizeof(uint64_t));
-	RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
+	printf("CLOCKS_PER_SEC: %ld\n", CLOCKS_PER_SEC);
+	clock_t start_time = clock(), end_time, interval_time = start_time;
+	for (i = 0; current_interval != 1./*qf.metadata->noccupied_slots <= target_fill*/; i++) {
+		if (!insert_key(&qf, backing_map, insert_set[i], 1)) break;
+		//database.insert(pair_t(insert_set[i], i));
+		if (qf.metadata->noccupied_slots >= measure_point) {
+                        printf("throughput for interval %f: \t%f\n", current_interval, (double)(i - last_point) * CLOCKS_PER_SEC / (clock() - interval_time));
+			printf("map inserts: %d\tmap_queries: %d\n", map_inserts, map_queries);
 
-	printf("performing queries... 0%%");
-	current_interval = measure_interval;
-	measure_point = num_queries * current_interval;
-	last_point = 0;
+			RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
 
-	uint64_t fp_count = 0;
-	start_time = clock();
-	for (i = 0; i < num_queries; i++) {
-		j = query_set[i];
+			uint64_t k;
+			uint64_t fp_count = 0;
+			clock_t query_start_time = clock();
+			for (k = 0; k < num_queries; k++) {
+				j = query_set[k];
 
-		if (qf_query(&qf, j, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH)) {
-			ordered_map_t::iterator item = database.find(j);
-			if (item == database.end()) {
-				fp_count++;
-				if (still_have_space) {
-					BACKING_MAP_T::iterator orig_key = backing_map.find(ret_hash | (1 << ret_hash_len));
-					ret_hash_len = qf_adapt(&qf, ret_index, orig_key->second, j, &ret_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
-					if (ret_hash_len > 0) {
-						backing_map.erase(orig_key);
-						backing_map.insert(std::make_pair(ret_hash | (1 << ret_hash_len), orig_key->second));
-					}
-					else if (ret_hash_len == QF_NO_SPACE) {
-						still_have_space = 0;
-						printf("\rfilter is full after %lu queries\n", i);
+				if (qf_query(&qf, j, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH)) {
+					ordered_map_t::iterator item = database.find(j);
+					if (item == database.end()) {
+						fp_count++;
+						if (0 && still_have_space) {
+							BACKING_MAP_T::iterator orig_key = backing_map.find(ret_hash | (1 << ret_hash_len));
+							ret_hash_len = qf_adapt(&qf, ret_index, orig_key->second, j, &ret_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
+							if (ret_hash_len > 0) {
+								backing_map.erase(orig_key);
+								backing_map.insert(std::make_pair(ret_hash | (1 << ret_hash_len), orig_key->second));
+							}
+							else if (ret_hash_len == QF_NO_SPACE) {
+								still_have_space = 0;
+								printf("filter is full after %lu queries\n", i);
+							}
+						}
 					}
 				}
 			}
-		}
-		if (qf.metadata->noccupied_slots >= measure_point) {
-			printf("\rperforming queries... %f%%           ", current_interval * 100);
+			printf("query throughput at %f fill: \t%f\n", current_interval, (double)(num_queries) * CLOCKS_PER_SEC / (clock() - query_start_time));
+			printf("false positive rate: \t%f\n\n", (double)(fp_count) / num_queries);
+
                         current_interval += measure_interval;
                         last_point = i;
                         measure_point = nslots * current_interval;
-                        interval_time = clock();
+			interval_time = clock();
                 }
-
 	}
 	end_time = clock();
-	printf("\rperforming queries... 100%%           \n");
 
-	printf("time for queries:  %f s\n", (double)(end_time - start_time) / CLOCKS_PER_SEC);
-	printf("query throughput:  %f ops/sec\n", (double)num_queries * CLOCKS_PER_SEC / (end_time - start_time));
-
-	printf("false positive rate: %f%%\n", 100. * fp_count / num_queries);
+	printf("time for inserts:      %f\n", (double)(end_time - start_time) / CLOCKS_PER_SEC);
+	printf("avg insert throughput: %f ops/sec\n", (double)i * CLOCKS_PER_SEC / (end_time - start_time));
 }
 
