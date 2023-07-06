@@ -79,7 +79,7 @@ int main(int argc, char **argv) {
 			printf("\nFailed insertion %lu", i);
 			break;
 		}
-		fprintf(stderr, "\r%lu/%lu", i, num_inserts);
+		fprintf(stderr, "\r%lu/%lu", i + 1, num_inserts);
 	}
 	clock_t end_time = clock();
 	fprintf(stderr, "\n");
