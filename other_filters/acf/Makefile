@@ -3,12 +3,12 @@ AR = ar
 PREFIX=/usr/local
 
 # Uncomment one of the following to switch between debug and opt mode
-OPT = -DNDEBUG -Ofast #-pg
-#OPT = -g -ggdb
+#OPT = -DNDEBUG -Ofast #-pg
+OPT = -g -ggdb
 
-CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ $(OPT)
+CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux $(OPT)
 
-LDFLAGS+= -Wall -lpthread -lssl -lcrypto -lstxxl -lsplinterdb
+LDFLAGS+= -Wall -lpthread -lssl -lcrypto -lstxxl -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux
 
 LIBOBJECTS = \
 	./src/hashutil.o \
@@ -16,7 +16,7 @@ LIBOBJECTS = \
 HEADERS = $(wildcard src/*.h)
 ALIB = libcuckoofilter.a
 
-TEST = test_ext_throughput test_churn #test test_fp test_bits test_micro test_fill_varied_throughput
+TEST = test_splinter_ops test_splinter_throughput #test_churn test_ext_throughput #test test_fp test_bits test_micro test_fill_varied_throughput
 
 all: $(TEST)
 
@@ -43,6 +43,12 @@ test_ext_throughput: example/test_ext_throughput.o $(LIBOBJECTS)
 
 test_churn: example/test_churn.o $(LIBOBJECTS)
 	$(CC) example/test_churn.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_splinter_ops: example/test_splinter_ops.o $(LIBOBJECTS)
+	$(CC) example/test_splinter_ops.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_splinter_throughput: example/test_splinter_throughput.o $(LIBOBJECTS)
+	$(CC) example/test_splinter_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
 %.o: %.cc ${HEADERS} Makefile
 	$(CC) $(CFLAGS) $< -o $@

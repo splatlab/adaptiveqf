@@ -35,8 +35,8 @@
 
 #define TEST_DB_NAME "db"
 
-#define MAX_KEY_SIZE sizeof(uint64_t)
-#define MAX_VAL_SIZE sizeof(uint64_t)
+#define MAX_KEY_SIZE 16
+#define MAX_VAL_SIZE 16
 
 void bp2() {
 	return;
@@ -99,8 +99,20 @@ void csv_get(char* buffer, int col) {
 }
 
 
-int map_inserts = 0;
-int map_queries = 0;
+uint64_t map_inserts = 0;
+uint64_t map_queries = 0;
+
+void pad_data(void *dest, const void *src, const size_t dest_len, const size_t src_len) {
+	assert(dest_len >= src_len);
+	memcpy(dest, src, src_len);
+	bzero(dest + src_len, dest_len - src_len);
+}
+
+slice padded_slice(const void *data, const size_t dest_len, const size_t src_len, void *buffer) {
+	pad_data(buffer, data, dest_len, src_len);
+	
+	return slice_create(dest_len, buffer);
+}
 
 int db_init(splinterdb **database, const char *db_name, uint64_t cache_size, uint64_t disk_size) {
         data_config data_cfg;
@@ -115,16 +127,20 @@ int db_init(splinterdb **database, const char *db_name, uint64_t cache_size, uin
         return splinterdb_create(&splinterdb_cfg, database);
 }
 
-int db_insert(splinterdb *database, const void *key_data, const void *val_data) {
-	slice key = slice_create(MAX_KEY_SIZE, (char*)key_data);
-	slice val = slice_create(MAX_VAL_SIZE, (char*)val_data);
+int db_insert(splinterdb *database, const void *key_data, const size_t key_len, const void *val_data, const size_t val_len) {
+	char key_padded[MAX_KEY_SIZE];
+	char val_padded[MAX_VAL_SIZE];
+	pad_data(key_padded, key_data, MAX_KEY_SIZE, key_len);
+	pad_data(val_padded, val_data, MAX_VAL_SIZE, val_len);
+	slice key = slice_create(MAX_KEY_SIZE, key_padded);
+	slice val = slice_create(MAX_VAL_SIZE, val_padded);
 
 	return splinterdb_insert(database, key, val);
 }
 
 splinterdb_lookup_result db_result;
 splinterdb_lookup_result bm_result;
-int insert_key(QF *qf, splinterdb *bm, uint64_t key, int count) {
+int insert_key(QF *qf, splinterdb *bm, uint64_t key, int count, void *buffer) {
         uint64_t ret_index, ret_hash, ret_other_hash;
         int ret_hash_len;
         int ret = qf_insert_ret(qf, key, count, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH);
@@ -133,7 +149,7 @@ int insert_key(QF *qf, splinterdb *bm, uint64_t key, int count) {
         }
         else if (ret == 0) {
 		uint64_t fingerprint_data = ret_hash | (1 << ret_hash_len);
-		slice fingerprint = slice_create(sizeof(uint64_t), (char*)(&fingerprint_data));
+		slice fingerprint = padded_slice(&fingerprint_data, MAX_KEY_SIZE, sizeof(fingerprint_data), buffer);
 		splinterdb_lookup(bm, fingerprint, &bm_result);
 		map_queries++;
                 if (!splinterdb_lookup_found(&bm_result)) {
@@ -155,25 +171,24 @@ int insert_key(QF *qf, splinterdb *bm, uint64_t key, int count) {
 				}
 
 				splinterdb_delete(bm, result_val);
-				uint64_t temp = ret_other_hash | (1 << ret_hash_len);
-				db_insert(bm, &temp, slice_data(result_val));
-				temp = ret_hash | (1 << ret_hash_len);
-				db_insert(bm, &temp, &key);
+				uint64_t temp = ret_other_hash | (1 << ext_len);
+				db_insert(bm, &temp, sizeof(temp), slice_data(result_val), MAX_VAL_SIZE);
+				temp = ret_hash | (1 << ext_len);
+				db_insert(bm, &temp, sizeof(temp), &key, sizeof(key));
 				map_inserts++;
 				map_inserts++;
 			}
                 }
+		return 1;
         }
         else if (ret == 1) {
 		uint64_t temp = ret_hash | (1 << ret_hash_len);
-		db_insert(bm, &temp, &key);
+		db_insert(bm, &temp, sizeof(temp), &key, sizeof(key));
 		map_inserts++;
+		return 1;
         }
-        else {
-                printf("other error: errno %d\n", ret);
-                return 0;
-        }
-        return 1;
+        printf("other error: errno %d\n", ret);
+        return 0;
 }
 
 
@@ -214,10 +229,27 @@ int main(int argc, char **argv)
 	/*splinterdb *database;
 	db_init(&database, "db", 64 * Mega, 128 * Mega);
 	splinterdb_lookup_result_init(database, &db_result, 0, NULL);*/
-	splinterdb *backing_map;
-	db_init(&backing_map, "bm", 64 * Mega, 128 * Mega);
+	/*splinterdb *backing_map;
+	if (db_init(&backing_map, "bm", 64 * Mega, 4 * Giga) != 0) {
+		printf("error initializing database\n");
+		exit(0);
+	}
+	splinterdb_lookup_result_init(backing_map, &bm_result, 0, NULL);*/
+
+        data_config bm_data_cfg;
+        default_data_config_init(MAX_KEY_SIZE, &bm_data_cfg);
+        splinterdb_config splinterdb_cfg = (splinterdb_config){
+                .filename   = "bm",
+                .cache_size = 64 * Mega,
+                .disk_size  = 8 * Giga,
+                .data_cfg   = &bm_data_cfg
+        };
+        splinterdb *backing_map;
+        if (splinterdb_create(&splinterdb_cfg, &backing_map) != 0) {
+                printf("Error creating database\n");
+                exit(0);
+        }
 	splinterdb_lookup_result_init(backing_map, &bm_result, 0, NULL);
-	
 
 	printf("initializing filter...\n");
 	QF qf;
@@ -243,6 +275,7 @@ int main(int argc, char **argv)
 	//std::cout << "performing insertions... 0%%" << std::flush;
 	uint64_t ret_index, ret_hash;
 	int ret_hash_len;
+	char buffer[MAX_KEY_SIZE];
 
 	double measure_interval = 0.01f;
         double current_interval = measure_interval;
@@ -251,13 +284,53 @@ int main(int argc, char **argv)
 	FILE *outfp = fopen(argv[4], "w");
 	fprintf(outfp, "./test_ext_throughput %s %s %s %s\n", argv[1], argv[2], argv[3], argv[4]);
 
+	// just testing correctness
+	/*char dummy_key[16], dummy_val[16], dummy_buffer[16];
+	bzero(dummy_key, 16);
+	bzero(dummy_val, 16);
+	dummy_key[0] = 'k';
+	dummy_val[0] = 'v';
+	slice dummy_key_slice = slice_create(16, dummy_key);
+	slice dummy_val_slice = slice_create(16, dummy_val);
+
+	assert(splinterdb_insert(backing_map, dummy_key_slice, dummy_val_slice) == 0);
+	splinterdb_lookup(backing_map, dummy_key_slice, &bm_result);
+	assert(splinterdb_lookup_found(&bm_result));
+
+	char dummy_query[16];
+	bzero(dummy_query, 16);
+	dummy_query[0] = 'k';
+	slice dummy_query_slice = slice_create(16, dummy_query);
+
+	splinterdb_lookup(backing_map, dummy_query_slice, &bm_result);
+	assert(splinterdb_lookup_found(&bm_result));
+
+	char dummy_short_query[8];
+	bzero(dummy_short_query, 8);
+	dummy_short_query[0] = 'k';
+	slice dummy_short_query_slice = padded_slice(dummy_short_query, 16, 8, dummy_buffer);
+
+	splinterdb_lookup(backing_map, dummy_short_query_slice, &bm_result);
+	assert(splinterdb_lookup_found(&bm_result));
+
+	exit(0);*/
+
+
 	clock_t start_time = clock(), end_time, interval_time = start_time;
 	for (i = 0; qf.metadata->noccupied_slots < target_fill; i++) {
-		if (!insert_key(&qf, backing_map, insert_set[i], 1)) break;
+		if (!insert_key(&qf, backing_map, insert_set[i], 1, buffer)) break;
+		assert(qf_query(&qf, insert_set[i], &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH) != 0);
+		char query_buffer[MAX_KEY_SIZE];
+		uint64_t query_data = ret_hash | (1 << ret_hash_len);
+		slice query = padded_slice(&query_data, MAX_KEY_SIZE, sizeof(query_data), query_buffer);
+		splinterdb_lookup(backing_map, query, &bm_result);
+		assert(splinterdb_lookup_found(&bm_result));
+
 		//db_insert(database, &insert_set[i], &i);
 		printf("\rperforming insertions... %lu/%lu          ", qf.metadata->noccupied_slots, target_fill);
 		fflush(stdout);
-		if (qf.metadata->noccupied_slots == 623) bp2();
+
+		if (qf.metadata->noccupied_slots == 8112) bp2();
 		if (qf.metadata->noccupied_slots >= measure_point) {
 			//std::cout << "\rperforming insertions... " << current_interval * 100 << "%%         " << std::flush;
 			fprintf(outfp, "%f\t%f\n", (double)qf.metadata->noccupied_slots / nslots, (double)(i - last_point) * CLOCKS_PER_SEC / (clock() - interval_time));
@@ -279,6 +352,9 @@ int main(int argc, char **argv)
 	printf("time for inserts:      %f\n", (double)(end_time - start_time) / CLOCKS_PER_SEC);
 	printf("avg insert throughput: %f ops/sec\n", (double)i * CLOCKS_PER_SEC / (end_time - start_time));
 
+	printf("for testing - actual inserts: %lu\n", map_inserts);
+
+	exit(0);
 
 	//backing_map.print_statistics(std::cout);
 	//backing_map.print_load_statistics(std::cout);

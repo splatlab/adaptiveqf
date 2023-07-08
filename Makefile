@@ -1,6 +1,6 @@
 CTARGETS=test test_threadsafe test_pc bm test_throughput test_fill_varied_throughput test_near_full test_deletions test_merge test_hash_accesses test_bulk test_whitelist test_resize
 CXXTARGETS=test_ext_throughput test_ext_inc_throughput test_zipf_throughput test_ext_churn test_adversarial taf
-SPLTARGETS=test_splinter_ops test_splinter_inserts test_splinter_throughput
+SPLTARGETS=test_splinter_ops test_splinter_inserts test_splinter_inserts_2 test_splinter_throughput
 # test_progress
 
 ifndef D
@@ -126,6 +126,10 @@ test_splinter_ops:							$(OBJDIR)/test_splinter_ops.o $(OBJDIR)/gqf.o \
 										$(OBJDIR)/partitioned_counter.o
 
 test_splinter_inserts:							$(OBJDIR)/test_splinter_inserts.o $(OBJDIR)/gqf.o \
+										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_splinter_inserts_2:							$(OBJDIR)/test_splinter_inserts_2.o $(OBJDIR)/gqf.o \
 										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
 										$(OBJDIR)/partitioned_counter.o
 

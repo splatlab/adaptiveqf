@@ -11,47 +11,12 @@
 #include "singletable.h"
 #include "mirroredtable.h"
 
-#include <stxxl/map>
-#include <stxxl/unordered_map>
-
-#define DATA_NODE_BLOCK_SIZE (4096)
-#define DATA_LEAF_BLOCK_SIZE (4096)
-
-#define SUB_BLOCK_SIZE (8192)
-#define SUB_BLOCKS_PER_BLOCK (256)
-
-//! [hash]
-struct HashFunctor {
-	size_t operator () (uint64_t key) const {
-		return (size_t)(key * 2654435761u);
-	}
-};
-//! [hash]
-
-//! [comparator]
-struct CompareGreater {
-        bool operator () (const uint64_t& a, const uint64_t& b) const {
-                return a > b;
-        }
-        static uint64_t max_value() {
-                return 0ULL;
-        }
-};
-//! [comparator]
-
-typedef stxxl::map<uint64_t, uint64_t, CompareGreater, DATA_NODE_BLOCK_SIZE, DATA_LEAF_BLOCK_SIZE> ordered_map_t;
-typedef std::pair<uint64_t, uint64_t> pair_t;
-
-typedef stxxl::unordered_map<uint64_t, uint64_t, HashFunctor, CompareGreater, SUB_BLOCK_SIZE, SUB_BLOCKS_PER_BLOCK> unordered_map_t;
-
-#define USE_UNORDERED_MAP 0
-#if USE_UNORDERED_MAP
-#define BACKING_MAP_T unordered_map_t
-#define BACKING_MAP_INSERT(X, Y, Z) X.insert(std::make_pair(Y, Z))
-#else
-#define BACKING_MAP_T ordered_map_t
-#define BACKING_MAP_INSERT(X, Y, Z) X.insert(pair_t(Y, Z))
-#endif
+extern "C" {
+#include <splinterdb/splinterdb.h>
+#include <splinterdb/data.h>
+#include <splinterdb/public_platform.h>
+#include <splinterdb/default_data_config.h>
+}
 
 namespace cuckoofilter {
 // status returned by a cuckoo filter operation
@@ -133,7 +98,7 @@ namespace cuckoofilter {
 					 hash_sels[index / 2] = (char)(n0 | (n1 << 4));
 				 }
 
-				 Status AddImpl(const uint64_t key, BACKING_MAP_T& backing_map);
+				 Status AddImpl(const uint64_t key);
 
 				 // load factor is the fraction of occupancy
 				 double LoadFactor() const { return 1.0 * Size() / table_->SizeInTags(); }
@@ -159,7 +124,9 @@ namespace cuckoofilter {
 				 ~CuckooFilter() { delete table_; }
 
 				 // Add an item to the filter.
-				 Status Add(const ItemType item, BACKING_MAP_T& backing_map);
+				 Status Add(const ItemType item);
+
+				 Status AddUsingBackingMap(const uint64_t item, splinterdb *backing_map, const size_t bm_max_key_size, const size_t bm_max_val_size, splinterdb_lookup_result *bm_result, unsigned char* buffer);
 
 				 // Report if the item is inserted, with false positive rate.
 				 Status Contain(const ItemType item) const;
@@ -167,10 +134,10 @@ namespace cuckoofilter {
 				 uint64_t ContainReturn(const ItemType item) const;
 
 
-				 Status Adapt(const ItemType item, BACKING_MAP_T& backing_map);
+				 Status Adapt(const ItemType item, splinterdb *backing_map, const size_t bm_max_key_size, const size_t bm_max_val_size, splinterdb_lookup_result *bm_result, unsigned char* buffer); // TODO: rename this to AdaptWithSplinterDB and add back in the old Adapt so older experiments still work (do same with Delete)
 
 				 // Delete an key from the filter
-				 Status Delete(const ItemType item, BACKING_MAP_T& backing_map);
+				 Status Delete(const ItemType item, splinterdb *backing_map, const size_t bm_max_key_size, const size_t bm_max_val_size, splinterdb_lookup_result *bm_result, unsigned char* buffer);
 
 				 /* methods for providing stats  */
 				 // summary infomation
@@ -184,17 +151,17 @@ namespace cuckoofilter {
 			 };
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Add(const ItemType item, BACKING_MAP_T& backing_map) {
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Add(const ItemType item) {
 			if (victim_.used) {
 				//victim_.used = false;
 				return NotEnoughSpace;
 			}
 
-			return AddImpl(item, backing_map);
+			return AddImpl(item);
 		}
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::AddImpl(const uint64_t key, BACKING_MAP_T& backing_map) {
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::AddImpl(const uint64_t key) {
 			size_t curindex = GenerateIndexHash(key);
 			uint64_t curkey = key;
 			uint64_t curtag = GenerateTagHash(curkey, curindex);
@@ -203,16 +170,87 @@ namespace cuckoofilter {
 				bool kickout = count > 0;
 				int insert_index = table_->InsertTagToBucket(curindex, curtag, curkey, kickout);
 				if (insert_index > 0) {
-					BACKING_MAP_INSERT(backing_map, curindex + (insert_index * table_->NumBuckets()), curkey);
+					//BACKING_MAP_INSERT(backing_map, curindex + (insert_index * table_->NumBuckets()), curkey);
+					map_inserts++;
+					num_items_++;
+					return Ok;
+				}
+				insert_index = -insert_index; // TODO: FIX THIS - THIS IS A REMNANT FROM USING STXXL TO REPLACE THE MIRRORED_TABLE'S BACKING STORE
+				//                                     CHANGE THE InsertTagToBucket FUNCTION BACK TO RETURNING THE OLD KEY?
+				//BACKING_MAP_T::iterator item = backing_map.find(curindex + (insert_index * table_->NumBuckets()));
+
+				map_kickouts++;
+				//uint64_t nextkey = item->second;
+				//item->second = curkey;
+				//curkey = nextkey;
+				curindex = AltIndexFromKey(curindex, curkey);
+				curtag = GenerateTagHash(curkey, curindex);
+			}
+
+			victim_.index = curindex;
+			victim_.tag = curtag;
+			victim_.used = true;
+			return Ok;
+		}
+
+	void pad_data(void *dest, const void *src, const size_t dest_len, const size_t src_len) {
+		assert(dest_len >= src_len);
+		memcpy(dest, src, src_len);
+		bzero((unsigned char*)dest + src_len, dest_len - src_len);
+	}
+
+	slice padded_slice(const void *data, const size_t dest_len, const size_t src_len, void *buffer) {
+		pad_data(buffer, data, dest_len, src_len);
+
+		return slice_create(dest_len, buffer);
+	}
+
+	int db_insert(splinterdb *database, const void *key_data, const size_t key_len, const size_t max_key_len, unsigned char *key_buffer, const void *val_data, const size_t val_len, const size_t max_val_len, unsigned char *val_buffer) {
+		pad_data(key_buffer, key_data, max_key_len, key_len);
+		pad_data(val_buffer, val_data, max_val_len, val_len);
+		slice key = slice_create(max_key_len, key_buffer);
+		slice val = slice_create(max_val_len, val_buffer);
+
+		return splinterdb_insert(database, key, val);
+	}
+
+	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::AddUsingBackingMap(const uint64_t key, splinterdb *backing_map, const size_t bm_max_key_size, const size_t bm_max_val_size, splinterdb_lookup_result *bm_result, unsigned char* buffer) {
+			if (victim_.used) {
+				return NotEnoughSpace;
+			}
+
+			size_t curindex = GenerateIndexHash(key);
+			uint64_t curkey = key;
+			uint64_t curtag = GenerateTagHash(curkey, curindex);
+
+			for (uint32_t count = 0; count < kMaxCuckooCount; count++) {
+				bool kickout = count < kMaxCuckooCount; // TODO: either remove this line or figure out if still needed
+				int insert_index = table_->InsertTagToBucket(curindex, curtag, curkey, kickout);
+				if (insert_index > 0) {
+					uint64_t temp = curindex + (insert_index * table_->NumBuckets());
+					db_insert(backing_map, &temp, sizeof(temp), bm_max_key_size, buffer, &curkey, sizeof(curkey), bm_max_val_size, buffer + bm_max_key_size);
+
 					map_inserts++;
 					num_items_++;
 					return Ok;
 				}
 				insert_index = -insert_index;
-				BACKING_MAP_T::iterator item = backing_map.find(curindex + (insert_index * table_->NumBuckets()));
+
+				uint64_t location_data = curindex + (insert_index * table_->NumBuckets());
+				slice location = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer);
+				splinterdb_lookup(backing_map, location, bm_result);
+
+				slice result_val;
+				splinterdb_lookup_result_value(bm_result, &result_val);
+
 				map_kickouts++;
-				uint64_t nextkey = item->second;
-				item->second = curkey;
+				uint64_t nextkey;
+				memcpy(&nextkey, slice_data(result_val), sizeof(uint64_t));
+
+				slice updated_slice = padded_slice(&curkey, bm_max_val_size, sizeof(curkey), buffer);
+				splinterdb_update(backing_map, location, updated_slice);
+
 				curkey = nextkey;
 				curindex = AltIndexFromKey(curindex, curkey);
 				curtag = GenerateTagHash(curkey, curindex);
@@ -225,7 +263,7 @@ namespace cuckoofilter {
 		}
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Adapt(const ItemType key, BACKING_MAP_T& backing_map) {
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Adapt(const ItemType key, splinterdb *backing_map, const size_t bm_max_key_size, const size_t bm_max_val_size, splinterdb_lookup_result *bm_result, unsigned char* buffer) {
 			uint64_t i1, i2, index;
 			uint64_t tag1, tag2;
 
@@ -244,10 +282,19 @@ namespace cuckoofilter {
 			IncrHashSel(index);
 			
 			for (size_t j = 0; j < 4; j++) {
-				BACKING_MAP_T::iterator item = backing_map.find(index | (j * table_->NumBuckets()));
+				uint64_t location_data = index + (j * table_->NumBuckets());
+				slice location = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer);
+				splinterdb_lookup(backing_map, location, bm_result);
+
+				if (!splinterdb_lookup_found(bm_result)) continue;
+
 				map_adapts++;
-				if (item == backing_map.end()) continue;
-				table_->UpdateTag(index, j, GenerateTagHash(item->second, index));
+				slice result_val;
+				splinterdb_lookup_result_value(bm_result, &result_val);
+
+				uint64_t updated_tag;
+				memcpy(&updated_tag, slice_data(result_val), sizeof(uint64_t));
+				table_->UpdateTag(index, j, GenerateTagHash(updated_tag, index));
 			}
 
 			/*uint64_t keys[4];
@@ -307,7 +354,7 @@ namespace cuckoofilter {
 
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Delete(const ItemType key, BACKING_MAP_T& backing_map) {
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::Delete(const ItemType key, splinterdb *backing_map, const size_t bm_max_key_size, const size_t bm_max_val_size, splinterdb_lookup_result *bm_result, unsigned char* buffer) {
 			size_t i1, i2;
 			uint64_t tag1, tag2;
 
@@ -320,11 +367,15 @@ namespace cuckoofilter {
 
 			if ((j = table_->DeleteTagFromBucket(i1, tag1)) != 0) {
 				num_items_--;
-				backing_map.erase(i1 + (j * table_->NumBuckets()));
+				uint64_t location_data = i1 + (j * table_->NumBuckets());
+				slice location = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer);
+				splinterdb_delete(backing_map, location);
 				goto TryEliminateVictim;
 			} else if ((j = table_->DeleteTagFromBucket(i2, tag2)) != 0) {
 				num_items_--;
-				backing_map.erase(i1 + (j * table_->NumBuckets()));
+				uint64_t location_data = i2 + (j * table_->NumBuckets());
+				slice location = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer);
+				splinterdb_delete(backing_map, location);
 				goto TryEliminateVictim;
 			} else if (victim_.used && ((tag1 == victim_.tag && i1 == victim_.index) ||
 					(tag2 == victim_.tag && i2 == victim_.index))) {

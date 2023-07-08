@@ -36,8 +36,8 @@
 #define Giga (1024UL * Mega)
 
 
-#define MAX_KEY_SIZE 8
-#define MAX_VAL_SIZE 8
+#define MAX_KEY_SIZE 16
+#define MAX_VAL_SIZE 16
 
 
 int main(int argc, char **argv) {
@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
 	splinterdb_config splinterdb_cfg = (splinterdb_config){
 		.filename   = TEST_DB_NAME,
                 .cache_size = 64 * Mega,
-                .disk_size  = 2 * Giga,
+                .disk_size  = 8 * Giga,
                 .data_cfg   = &data_cfg
 	};
 

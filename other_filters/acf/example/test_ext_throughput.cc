@@ -10,6 +10,15 @@
 #include <stxxl/unordered_map>
 #include <stxxl/map>
 
+#define Kilo (1024UL)
+#define Mega (1024UL * Kilo)
+#define Giga (1024UL * Mega)
+
+#define TEST_DB_NAME "db"
+
+#define MAX_KEY_SIZE 16
+#define MAX_VAL_SIZE 16
+
 using cuckoofilter::CuckooFilter;
 
 int main(int argc, char **argv) {
@@ -44,13 +53,22 @@ int main(int argc, char **argv) {
 	//   CuckooFilter<size_t, 13, cuckoofilter::PackedTable> filter(total_items);
 	printf("initializing data structures...\n");
 	CuckooFilter<size_t, 8> filter(total_inserts);
-#if USE_UNORDERED_MAP
-	unordered_map_t backing_map;
-	//backing_map.max_buffer_size(SUB_BLOCK_SIZE);
-#else
-	ordered_map_t backing_map((ordered_map_t::node_block_type::raw_size) * 3, (ordered_map_t::leaf_block_type::raw_size) * 3);
-#endif
-	ordered_map_t database((ordered_map_t::node_block_type::raw_size) * 3, (ordered_map_t::leaf_block_type::raw_size) * 3);
+
+	data_config bm_data_cfg;
+        default_data_config_init(MAX_KEY_SIZE, &bm_data_cfg);
+        splinterdb_config splinterdb_cfg = (splinterdb_config){
+                .filename   = "bm",
+                .cache_size = 64 * Mega,
+                .disk_size  = 8 * Giga,
+                .data_cfg   = &bm_data_cfg
+        };
+        splinterdb *backing_map;
+        if (splinterdb_create(&splinterdb_cfg, &backing_map) != 0) {
+                printf("Error creating database\n");
+                exit(0);
+        }
+	splinterdb_lookup_result bm_result;
+	splinterdb_lookup_result_init(backing_map, &bm_result, 0, NULL);
 
 	printf("generating inserts...\n");
 	uint64_t *inserts = new uint64_t[total_inserts];
@@ -67,13 +85,15 @@ int main(int argc, char **argv) {
 	clock_t query_start_time, query_end_time;
 	size_t inc_queries = 1000000;
 
+	char buffer[MAX_KEY_SIZE + MAX_VAL_SIZE];
+
 	for (size_t i = 0; i <= total_inserts; i++, num_inserted++) {
-		if (filter.Add(inserts[i], backing_map) != cuckoofilter::Ok) {
+		if (filter.Add(inserts[i], backing_map, MAX_KEY_SIZE, MAX_VAL_SIZE, &bm_result, buffer) != cuckoofilter::Ok) {
 			//filter.Add(inserts[i], backing_map);
 			printf("insert failed at fill rate %f\n", (double)i/nslots);
 			break;
 		}
-		database.insert(pair_t(inserts[i], i));
+		//database.insert(pair_t(inserts[i], i));
 		std::cout << "\r" << i << "/" << total_inserts << std::flush;
 		if (i >= measure_point) {
 			printf("throughput for interval %f: \t%f\n", current_interval, 1000000. * (num_inserted - last_point) / (clock() - interval_time));
@@ -83,6 +103,8 @@ int main(int argc, char **argv) {
 			interval_time = clock();
 			printf("inserts: %d\tkickouts: %d\tadapts: %d\n", filter.map_inserts, filter.map_kickouts, filter.map_adapts);
 
+			continue;
+
 			uint64_t *queries = new uint64_t[inc_queries];
 			RAND_bytes((unsigned char*)(queries), inc_queries * sizeof(uint64_t));
 			query_start_time = clock();
@@ -91,13 +113,14 @@ int main(int argc, char **argv) {
 				//uint64_t key = query_set[i];
 				uint64_t contain_ret = filter.ContainReturn(key);
 				if (contain_ret) {
-					//p_queries++;
-					ordered_map_t::iterator item = database.find(key);
+					//p_queries++; // TODO: after adding database, uncomment the block below and check veracity of filter
+					/*ordered_map_t::iterator item = database.find(key);
+
 					if (item == database.end()) {
 						//fp_queries++;
 						BACKING_MAP_T::iterator orig_key = backing_map.find(contain_ret);
 						//if (filter.Adapt(orig_key->second, backing_map) != cuckoofilter::Ok) printf("error: adapt failed to find previously queried item\n");
-					}
+					}*/
 				}
 			}
 			query_end_time = clock();
@@ -109,7 +132,8 @@ int main(int argc, char **argv) {
 	printf("made %lu inserts\n", num_inserted);
 	printf("time per insert:      %f us\n", (double)(end_time - start_time) / num_inserted);
 	printf("insert throughput:    %f ops/sec\n", 1000000. * num_inserted / (end_time - start_time));
-	//return 0;
+	
+	return 0;
 
 	/*uint64_t *query_set = (uint64_t*)calloc(total_items, sizeof(uint64_t));
 	for (size_t i = 0; i < total_items; i++) {
@@ -137,7 +161,7 @@ int main(int argc, char **argv) {
 
 	printf("performing queries...\n");
 	start_time = clock();
-	for (size_t i = 0; i < total_queries; i++) {
+	/*for (size_t i = 0; i < total_queries; i++) {
 		uint64_t key = queries[i];
 		//uint64_t key = query_set[i];
 		uint64_t contain_ret = filter.ContainReturn(key);
@@ -150,7 +174,7 @@ int main(int argc, char **argv) {
 				if (filter.Adapt(orig_key->second, backing_map) != cuckoofilter::Ok) printf("error: adapt failed to find previously queried item\n");
 			}
 		}
-	}
+	}*/
 	end_time = clock();
 	printf("made %lu queries\n", total_queries);
 	printf("time per query:       %f us\n", (double)(end_time - start_time) / total_queries);

@@ -8,31 +8,34 @@
 #include <vector>
 #include <openssl/rand.h>
 
-#include <splinterdb/splinter.h>
+extern "C" {
+#include <splinterdb/splinterdb.h>
 #include <splinterdb/data.h>
 #include <splinterdb/public_platform.h>
 #include <splinterdb/default_data_config.h>
+}
+
+#define Kilo (1024UL)
+#define Mega (1024UL * Kilo)
+#define Giga (1024UL * Mega)
+
+#define TEST_DB_NAME "db"
+
+#define MAX_KEY_SIZE 16
+#define MAX_VAL_SIZE 16
 
 using cuckoofilter::CuckooFilter;
 
-int db_init(splinterdb **database, const char *db_name, uint64_t cache_size, uint64_t disk_size) {
-        data_config data_cfg;
-        default_data_config_init(MAX_KEY_SIZE, &data_cfg);
-        splinterdb_config splinterdb_cfg = (splinterdb_config){
-                .filename   = db_name,
-                .cache_size = cache_size,
-                .disk_size  = disk_size,
-                .data_cfg   = &data_cfg
-        };
-
-        return splinterdb_create(&splinterdb_cfg, database);
+uint64_t rand_uniform(uint64_t max) {
+        if (max <= RAND_MAX) return rand() % max;
+        uint64_t a = rand();
+        uint64_t b = rand();
+        a |= (b << 31);
+        return a % max;
 }
 
-int db_insert(splinterdb *database, const void *key_data, const void *val_data) {
-        slice key = slice_create(MAX_KEY_SIZE, (char*)key_data);
-        slice val = slice_create(MAX_VAL_SIZE, (char*)val_data);
-
-        return splinterdb_insert(database, key, val);
+void bp() {
+	return;
 }
 
 int main(int argc, char **argv) {
@@ -66,11 +69,22 @@ int main(int argc, char **argv) {
 	// for each key:
 	//   CuckooFilter<size_t, 13, cuckoofilter::PackedTable> filter(total_items);
 	printf("initializing data structures...\n");
-	CuckooFilter<size_t, 8> filter(total_inserts);
+	CuckooFilter<size_t, 12> filter(total_inserts);
 
-	splinterdb *backing_map;
-        db_init(&backing_map, "bm", 64 * Mega, 128 * Mega);
-	splinterdb_lookup_result bm_result;
+	data_config bm_data_cfg;
+        default_data_config_init(MAX_KEY_SIZE, &bm_data_cfg);
+        splinterdb_config splinterdb_cfg = (splinterdb_config){
+                .filename   = "bm",
+                .cache_size = 64 * Mega,
+                .disk_size  = 8 * Giga,
+                .data_cfg   = &bm_data_cfg
+        };
+        splinterdb *backing_map;
+        if (splinterdb_create(&splinterdb_cfg, &backing_map) != 0) {
+                printf("Error creating database\n");
+                exit(0);
+        }
+        splinterdb_lookup_result bm_result;
         splinterdb_lookup_result_init(backing_map, &bm_result, 0, NULL);
 
 	printf("generating inserts...\n");
@@ -80,23 +94,25 @@ int main(int argc, char **argv) {
 	printf("starting inserts...\n");
 
 	// Insert items to this cuckoo filter
-	double measure_interval = 0.05f;
-	double current_interval = measure_interval;
-	uint64_t measure_point = nslots * current_interval, last_point = 0;
+	//double measure_interval = 0.05f;
+	//double current_interval = measure_interval;
+	//uint64_t measure_point = nslots * current_interval, last_point = 0;
 	size_t num_inserted = 0;
-	clock_t start_time = clock(), end_time, interval_time = start_time;
-	clock_t query_start_time, query_end_time;
-	size_t inc_queries = 1000000;
+	clock_t start_time = clock(), end_time;//, interval_time = start_time;
+	//clock_t query_start_time, query_end_time;
+	//size_t inc_queries = 1000000;
+
+	unsigned char buffer[MAX_KEY_SIZE + MAX_VAL_SIZE];
 
 	for (size_t i = 0; i <= total_inserts; i++, num_inserted++) {
-		if (filter.Add(inserts[i], backing_map) != cuckoofilter::Ok) {
+		if (filter.AddUsingBackingMap(inserts[i], backing_map, MAX_KEY_SIZE, MAX_VAL_SIZE, &bm_result, buffer) != cuckoofilter::Ok) {
 			//filter.Add(inserts[i], backing_map);
 			printf("insert failed at fill rate %f\n", (double)i/nslots);
 			break;
 		}
-		database.insert(pair_t(inserts[i], i));
+		//database.insert(pair_t(inserts[i], i));
 		std::cout << "\r" << i << "/" << total_inserts << std::flush;
-		if (i >= measure_point) {
+		/*if (i >= measure_point) {
 			printf("throughput for interval %f: \t%f\n", current_interval, 1000000. * (num_inserted - last_point) / (clock() - interval_time));
 			current_interval += measure_interval;
 			last_point = measure_point;
@@ -123,14 +139,15 @@ int main(int argc, char **argv) {
 			}
 			query_end_time = clock();
 			printf("query throughput: %f\n", (double)(query_end_time - query_start_time) * CLOCKS_PER_SEC / inc_queries);
-		}
+		}*/
 	}
 	end_time = clock();
 
 	printf("made %lu inserts\n", num_inserted);
 	printf("time per insert:      %f us\n", (double)(end_time - start_time) / num_inserted);
 	printf("insert throughput:    %f ops/sec\n", 1000000. * num_inserted / (end_time - start_time));
-	//return 0;
+	
+	return 0;
 
 	/*uint64_t *query_set = (uint64_t*)calloc(total_items, sizeof(uint64_t));
 	for (size_t i = 0; i < total_items; i++) {
@@ -140,7 +157,7 @@ int main(int argc, char **argv) {
 
 	// Check non-existing items, a few false positives expected
 	size_t fp_queries = 0;
-	size_t p_queries = 0;
+	//size_t p_queries = 0;
 	/*for (size_t i = total_items; i < 2 * total_items; i++) {
 	  if (filter.Contain(i) == cuckoofilter::Ok) {
 	  false_queries++;
@@ -158,7 +175,7 @@ int main(int argc, char **argv) {
 
 	printf("performing queries...\n");
 	start_time = clock();
-	for (size_t i = 0; i < total_queries; i++) {
+	/*for (size_t i = 0; i < total_queries; i++) {
 		uint64_t key = queries[i];
 		//uint64_t key = query_set[i];
 		uint64_t contain_ret = filter.ContainReturn(key);
@@ -171,7 +188,7 @@ int main(int argc, char **argv) {
 				if (filter.Adapt(orig_key->second, backing_map) != cuckoofilter::Ok) printf("error: adapt failed to find previously queried item\n");
 			}
 		}
-	}
+	}*/
 	end_time = clock();
 	printf("made %lu queries\n", total_queries);
 	printf("time per query:       %f us\n", (double)(end_time - start_time) / total_queries);
