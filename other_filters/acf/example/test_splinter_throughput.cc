@@ -42,21 +42,21 @@ int main(int argc, char **argv) {
 	uint64_t seed;
 	size_t total_queries = 1000000;
 	size_t nslots = 1 << 16;
-	if (argc < 3) {
-		printf("Usage: ./test_ext_throughput [log of nslots] [num queries]\n");
+	if (argc < 4) {
+		printf("Usage: ./test_ext_throughput [log of nslots] [num queries] [output file]\n");
 		exit(1);
 	}
-	else if (argc >= 3) {
-		nslots = 1 << atoi(argv[1]);
+	else if (argc >= 4) {
+		nslots = 1ull << atoi(argv[1]);
 		total_queries = strtoull(argv[2], NULL, 10);
 	}
-	if (argc >= 4) {
+	if (argc >= 5) {
 		seed = strtoull(argv[3], NULL, 10);
 	}
 	else {
 		seed = time(NULL);
 	}
-	size_t total_inserts = nslots * 0.9;
+	size_t total_inserts = nslots * 0.95;
 
 	printf("running on seed %lu\n", seed);
 	srand(seed);
@@ -94,15 +94,17 @@ int main(int argc, char **argv) {
 	printf("starting inserts...\n");
 
 	// Insert items to this cuckoo filter
-	//double measure_interval = 0.05f;
-	//double current_interval = measure_interval;
-	//uint64_t measure_point = nslots * current_interval, last_point = 0;
+	double measure_interval = 0.01f;
+	double current_interval = measure_interval;
+	uint64_t measure_point = nslots * current_interval, last_point = 0;
 	size_t num_inserted = 0;
-	clock_t start_time = clock(), end_time;//, interval_time = start_time;
+	clock_t start_time = clock(), end_time, interval_time = start_time;
 	//clock_t query_start_time, query_end_time;
 	//size_t inc_queries = 1000000;
 
 	unsigned char buffer[MAX_KEY_SIZE + MAX_VAL_SIZE];
+	FILE *outfp = fopen(argv[3], "w");
+	fprintf(outfp, "./test_splinter_throughput %s %s %s\n", argv[1], argv[2], argv[3]);
 
 	for (size_t i = 0; i <= total_inserts; i++, num_inserted++) {
 		if (filter.AddUsingBackingMap(inserts[i], backing_map, MAX_KEY_SIZE, MAX_VAL_SIZE, &bm_result, buffer) != cuckoofilter::Ok) {
@@ -111,16 +113,19 @@ int main(int argc, char **argv) {
 			break;
 		}
 		//database.insert(pair_t(inserts[i], i));
-		std::cout << "\r" << i << "/" << total_inserts << std::flush;
-		/*if (i >= measure_point) {
-			printf("throughput for interval %f: \t%f\n", current_interval, 1000000. * (num_inserted - last_point) / (clock() - interval_time));
+		//std::cout << "\r" << i << "/" << total_inserts << std::flush;
+		if (i >= measure_point) {
+			//printf("throughput for interval %f: \t%f\n", current_interval, 1000000. * (num_inserted - last_point) / (clock() - interval_time));
+			fprintf(outfp, "%f\t%f\n", current_interval * 100, (double)(num_inserted - last_point) * CLOCKS_PER_SEC / (clock() - interval_time));
 			current_interval += measure_interval;
 			last_point = measure_point;
 			measure_point = nslots * current_interval;
 			interval_time = clock();
-			printf("inserts: %d\tkickouts: %d\tadapts: %d\n", filter.map_inserts, filter.map_kickouts, filter.map_adapts);
+			fprintf(stderr, "\r%d%%", (int)(100 * current_interval));
+			//printf("inserts: %d\tkickouts: %d\tadapts: %d\n", filter.map_inserts, filter.map_kickouts, filter.map_adapts);
+			
 
-			uint64_t *queries = new uint64_t[inc_queries];
+			/*uint64_t *queries = new uint64_t[inc_queries];
 			RAND_bytes((unsigned char*)(queries), inc_queries * sizeof(uint64_t));
 			query_start_time = clock();
 			for (size_t ii = 0; ii < inc_queries; ii++) {
@@ -138,11 +143,14 @@ int main(int argc, char **argv) {
 				}
 			}
 			query_end_time = clock();
-			printf("query throughput: %f\n", (double)(query_end_time - query_start_time) * CLOCKS_PER_SEC / inc_queries);
-		}*/
+			printf("query throughput: %f\n", (double)(query_end_time - query_start_time) * CLOCKS_PER_SEC / inc_queries);*/
+		}
 	}
 	end_time = clock();
 
+	fclose(outfp);
+
+	printf("\n");
 	printf("made %lu inserts\n", num_inserted);
 	printf("time per insert:      %f us\n", (double)(end_time - start_time) / num_inserted);
 	printf("insert throughput:    %f ops/sec\n", 1000000. * num_inserted / (end_time - start_time));

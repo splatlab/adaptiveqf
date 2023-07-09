@@ -3,7 +3,7 @@ CXXTARGETS=test_ext_throughput test_ext_inc_throughput test_zipf_throughput test
 SPLTARGETS=test_splinter_ops test_splinter_inserts test_splinter_inserts_2 test_splinter_throughput
 # test_progress
 
-ifndef D
+ifdef D
 	DEBUG=-g
 	OPT=
 else

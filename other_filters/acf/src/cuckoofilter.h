@@ -118,7 +118,7 @@ namespace cuckoofilter {
 					 victim_.used = false;
 					 table_ = new TableType<bits_per_item>(num_buckets);
 					 hash_sels = new char[num_buckets / 2];
-					 hash_fcns = new HashFamily[num_buckets];
+					 hash_fcns = new HashFamily[1 << 4];
 				 }
 
 				 ~CuckooFilter() { delete table_; }

@@ -3,8 +3,8 @@ AR = ar
 PREFIX=/usr/local
 
 # Uncomment one of the following to switch between debug and opt mode
-#OPT = -DNDEBUG -Ofast #-pg
-OPT = -g -ggdb
+OPT = -DNDEBUG -Ofast #-pg
+#OPT = -g -ggdb
 
 CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux $(OPT)
 
