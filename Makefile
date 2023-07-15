@@ -1,6 +1,6 @@
-CTARGETS=test test_threadsafe test_pc bm test_throughput test_fill_varied_throughput test_near_full test_deletions test_merge test_hash_accesses test_bulk test_whitelist test_resize
+CTARGETS=test test_threadsafe test_pc bm test_throughput test_fill_varied_throughput test_near_full test_deletions test_merge test_hash_accesses test_bulk test_whitelist test_resize test_micro_throughput test_micro_write test_micro_read
 CXXTARGETS=test_ext_throughput test_ext_inc_throughput test_zipf_throughput test_ext_churn test_adversarial taf
-SPLTARGETS=test_splinter_ops test_splinter_inserts test_splinter_inserts_2 test_splinter_throughput
+SPLTARGETS=test_splinter_ops test_splinter_inserts test_splinter_inserts_2 test_splinter_throughput test_splinter_zipfian_histogram test_splinter_adversarial
 # test_progress
 
 ifdef D
@@ -30,7 +30,7 @@ CC = gcc -std=gnu11
 CXX = g++ -std=c++11
 LD= gcc -std=gnu11
 
-CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -lpthread -lssl -lcrypto -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux -DSKIP_BOOL_DEF -m64 -I. -Iinclude
+CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -lpthread -lssl -lcrypto -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux -DSKIP_BOOL_DEF -D_GNU_SOURCE -m64 -I. -Iinclude
 
 LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm -lsplinterdb
 #LDFLAGS += -L/usr/lib/ -lstxxl
@@ -52,6 +52,18 @@ test_progress:								$(OBJDIR)/test_progress.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_fi
 										$(OBJDIR)/partitioned_counter.o
 
 test_throughput:							$(OBJDIR)/test_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_micro_throughput:							$(OBJDIR)/test_micro_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_micro_write:							$(OBJDIR)/test_micro_write.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_micro_read:							$(OBJDIR)/test_micro_read.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
 										$(OBJDIR)/partitioned_counter.o
 
@@ -134,6 +146,14 @@ test_splinter_inserts_2:							$(OBJDIR)/test_splinter_inserts_2.o $(OBJDIR)/gqf
 										$(OBJDIR)/partitioned_counter.o
 
 test_splinter_throughput:							$(OBJDIR)/test_splinter_throughput.o $(OBJDIR)/gqf.o \
+										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_splinter_zipfian_histogram:							$(OBJDIR)/test_splinter_zipfian_histogram.o $(OBJDIR)/gqf.o \
+										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_splinter_adversarial:							$(OBJDIR)/test_splinter_adversarial.o $(OBJDIR)/gqf.o \
 										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
 										$(OBJDIR)/partitioned_counter.o
 

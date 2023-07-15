@@ -18,6 +18,137 @@ extern "C" {
 #include <splinterdb/default_data_config.h>
 }
 
+uint64_t MurmurHash64A(const void* key, int len, uint64_t seed) {
+        const uint64_t m = 0xc6a4a7935bd1e995LLU;
+        const int r = 47;
+
+        uint64_t h = seed ^ (len * m);
+
+        const uint64_t* data = (const uint64_t*)key;
+        const uint64_t* end = (len >> 3) + data;
+
+        while (data != end) {
+                uint64_t k = *data++;
+
+                k *= m;
+                k ^= k >> r;
+                k *= m;
+
+                h ^= k;
+                h *= m;
+        }
+
+        const unsigned char * data2 = (const unsigned char*)data;
+
+        switch (len & 7) {
+                case 7: h ^= (uint64_t)(data2[6]) << 48;
+                case 6: h ^= (uint64_t)(data2[5]) << 40;
+                case 5: h ^= (uint64_t)(data2[4]) << 32;
+                case 4: h ^= (uint64_t)(data2[3]) << 24;
+                case 3: h ^= (uint64_t)(data2[2]) << 16;
+                case 2: h ^= (uint64_t)(data2[1]) << 8;
+                case 1: h ^= (uint64_t)(data2[0]);
+                        h *= m;
+        };
+
+        h ^= h >> r;
+        h *= m;
+        h ^= h >> r;
+
+        return h;
+}
+
+#define HASH_SET_SEED 26571997
+struct _set_node {
+        struct _set_node *next;
+        uint64_t key;
+        uint64_t value;
+} typedef set_node;
+
+int set_insert(set_node *set, int set_len, uint64_t key, uint64_t value) {
+        if (!key) key++;
+        uint64_t hash = MurmurHash64A((void*)(&key), sizeof(key), HASH_SET_SEED);
+        set_node *ptr = &set[hash % set_len];
+        if (!ptr->key) {
+                ptr->key = key;
+                ptr->value = value;
+        }
+        else {
+                while (ptr->next) {
+                        if (ptr->key == key) return 0;
+                        ptr = ptr->next;
+                }
+                if (ptr->key == key) return 0;
+                set_node *node = new set_node;
+                ptr->next = node;
+
+                node->next = NULL;
+                node->key = key;
+                node->value = value;
+        }
+        return 1;
+}
+
+int set_query(set_node *set, int set_len, uint64_t key, uint64_t *value) {
+        if (!key) key++;
+        uint64_t hash = MurmurHash64A((void*)(&key), sizeof(key), HASH_SET_SEED);
+        set_node *ptr = &set[hash % set_len];
+        if (!ptr->key) {
+                return 0;
+        }
+        else {
+                while (ptr->next) {
+                        if (ptr->key == key) {
+                                *value = ptr->value;
+                                return 1;
+                        }
+                        ptr = ptr->next;
+                }
+                if (ptr->key == key){
+                        *value = ptr->value;
+                        return 1;
+                }
+                else return 0;
+        }
+}
+
+int set_delete(set_node *set, int set_len, uint64_t key) {
+        if (!key) key++;
+        uint64_t hash = MurmurHash64A((void*)(&key), sizeof(key), HASH_SET_SEED);
+        set_node *ptr = &set[hash % set_len];
+        if (!ptr->key) {
+                return 0;
+        }
+        else if (ptr->key == key) {
+                if (ptr->next) {
+                        set_node *temp = ptr->next;
+                        ptr->key = ptr->next->key;
+                        ptr->value = ptr->next->value;
+                        ptr->next = ptr->next->next;
+                        free(temp);
+                }
+                else {
+                        ptr->key = 0;
+                }
+                return 1;
+        }
+        else if (!ptr->next) {
+                return 0;
+        }
+        else {
+                do {
+                        if (ptr->next->key == key) {
+                                set_node *temp = ptr->next;
+                                ptr->next = ptr->next->next;
+                                free(temp);
+                                return 1;
+                        }
+                        ptr = ptr->next;
+                } while (ptr->next);
+                return 0;
+        }
+}
+
 namespace cuckoofilter {
 // status returned by a cuckoo filter operation
 	enum Status {
@@ -128,13 +259,17 @@ namespace cuckoofilter {
 
 				 Status AddUsingBackingMap(const uint64_t item, splinterdb *backing_map, const size_t bm_max_key_size, const size_t bm_max_val_size, splinterdb_lookup_result *bm_result, unsigned char* buffer);
 
+				 Status AddUsingSet(const uint64_t item, set_node *set, uint64_t set_len);
+
 				 // Report if the item is inserted, with false positive rate.
 				 Status Contain(const ItemType item) const;
 
-				 uint64_t ContainReturn(const ItemType item) const;
+				 Status ContainReturn(const ItemType item, uint64_t *ret_location) const;
 
 
 				 Status Adapt(const ItemType item, splinterdb *backing_map, const size_t bm_max_key_size, const size_t bm_max_val_size, splinterdb_lookup_result *bm_result, unsigned char* buffer); // TODO: rename this to AdaptWithSplinterDB and add back in the old Adapt so older experiments still work (do same with Delete)
+
+				 Status AdaptUsingSet(const ItemType item, set_node *set, const uint64_t set_len);
 
 				 // Delete an key from the filter
 				 Status Delete(const ItemType item, splinterdb *backing_map, const size_t bm_max_key_size, const size_t bm_max_val_size, splinterdb_lookup_result *bm_result, unsigned char* buffer);
@@ -193,21 +328,24 @@ namespace cuckoofilter {
 			return Ok;
 		}
 
-	void pad_data(void *dest, const void *src, const size_t dest_len, const size_t src_len) {
+	void bp_acf() {}
+
+	void pad_data(void *dest, const void *src, const size_t dest_len, const size_t src_len, const int flagged) {
 		assert(dest_len >= src_len);
+		if (flagged) memset(dest, 0xff, dest_len);
+		else bzero(dest, dest_len);
 		memcpy(dest, src, src_len);
-		bzero((unsigned char*)dest + src_len, dest_len - src_len);
 	}
 
-	slice padded_slice(const void *data, const size_t dest_len, const size_t src_len, void *buffer) {
-		pad_data(buffer, data, dest_len, src_len);
+	slice padded_slice(const void *data, const size_t dest_len, const size_t src_len, void *buffer, const int flagged) {
+		pad_data(buffer, data, dest_len, src_len, flagged);
 
 		return slice_create(dest_len, buffer);
 	}
 
-	int db_insert(splinterdb *database, const void *key_data, const size_t key_len, const size_t max_key_len, unsigned char *key_buffer, const void *val_data, const size_t val_len, const size_t max_val_len, unsigned char *val_buffer) {
-		pad_data(key_buffer, key_data, max_key_len, key_len);
-		pad_data(val_buffer, val_data, max_val_len, val_len);
+	int db_insert(splinterdb *database, const void *key_data, const size_t key_len, const size_t max_key_len, unsigned char *key_buffer, const void *val_data, const size_t val_len, const size_t max_val_len, unsigned char *val_buffer, const int flagged) {
+		pad_data(key_buffer, key_data, max_key_len, key_len, flagged);
+		pad_data(val_buffer, val_data, max_val_len, val_len, 0);
 		slice key = slice_create(max_key_len, key_buffer);
 		slice val = slice_create(max_val_len, val_buffer);
 
@@ -224,12 +362,16 @@ namespace cuckoofilter {
 			uint64_t curkey = key;
 			uint64_t curtag = GenerateTagHash(curkey, curindex);
 
+			//if (curindex == 234) bp_acf();
+
 			for (uint32_t count = 0; count < kMaxCuckooCount; count++) {
+				//if (curtag == 13968 && (curtag == 1680 || curtag == 3117));
 				bool kickout = count < kMaxCuckooCount; // TODO: either remove this line or figure out if still needed
 				int insert_index = table_->InsertTagToBucket(curindex, curtag, curkey, kickout);
+				if (insert_index == 0) break;
 				if (insert_index > 0) {
-					uint64_t temp = curindex + (insert_index * table_->NumBuckets());
-					db_insert(backing_map, &temp, sizeof(temp), bm_max_key_size, buffer, &curkey, sizeof(curkey), bm_max_val_size, buffer + bm_max_key_size);
+					uint64_t temp = curindex + ((insert_index - 1) * table_->NumBuckets());
+					db_insert(backing_map, &temp, sizeof(temp), bm_max_key_size, buffer, &curkey, sizeof(curkey), bm_max_val_size, buffer + bm_max_key_size, 0);
 
 					map_inserts++;
 					num_items_++;
@@ -237,8 +379,8 @@ namespace cuckoofilter {
 				}
 				insert_index = -insert_index;
 
-				uint64_t location_data = curindex + (insert_index * table_->NumBuckets());
-				slice location = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer);
+				uint64_t location_data = curindex + ((insert_index - 1) * table_->NumBuckets());
+				slice location = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer, 0);
 				splinterdb_lookup(backing_map, location, bm_result);
 
 				slice result_val;
@@ -248,8 +390,58 @@ namespace cuckoofilter {
 				uint64_t nextkey;
 				memcpy(&nextkey, slice_data(result_val), sizeof(uint64_t));
 
-				slice updated_slice = padded_slice(&curkey, bm_max_val_size, sizeof(curkey), buffer);
-				splinterdb_update(backing_map, location, updated_slice);
+				splinterdb_delete(backing_map, location);
+				slice updated_slice = padded_slice(&curkey, bm_max_val_size, sizeof(curkey), buffer + bm_max_key_size, 0);
+				splinterdb_insert(backing_map, location, updated_slice);
+
+				/*slice test_slice = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer, 1);
+				splinterdb_lookup(backing_map, test_slice, bm_result);
+				splinterdb_lookup_result_value(bm_result, &result_val);
+				assert(memcmp(&curkey, slice_data(result_val), sizeof(curkey)) == 0);
+				uint64_t temp_i1 = GenerateIndexHash(curkey);
+				uint64_t temp_tag1 = GenerateTagHash(curkey, temp_i1);
+				uint64_t temp_i2 = GenerateAltIndexHash(curkey, temp_i1);
+				uint64_t temp_tag2 = GenerateTagHash(curkey, temp_i2);
+				assert(table_->FindTagInBucket(temp_i1, temp_tag1) || table_->FindTagInBucket(temp_i2, temp_tag2));*/
+
+				curkey = nextkey;
+				curindex = AltIndexFromKey(curindex, curkey);
+				curtag = GenerateTagHash(curkey, curindex);
+			}
+
+			victim_.index = curindex;
+			victim_.tag = curtag;
+			victim_.used = true;
+			return Ok;
+		}
+
+	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::AddUsingSet(const uint64_t key, set_node *set, uint64_t set_len) {
+			if (victim_.used) {
+				return NotEnoughSpace;
+			}
+
+			size_t curindex = GenerateIndexHash(key);
+			uint64_t curkey = key;
+			uint64_t curtag = GenerateTagHash(curkey, curindex);
+
+			for (uint32_t count = 0; count < kMaxCuckooCount; count++) {
+				bool kickout = count < kMaxCuckooCount; // TODO: either remove this line or figure out if still needed
+				int insert_index = table_->InsertTagToBucket(curindex, curtag, curkey, kickout);
+				if (insert_index == 0) break;
+				if (insert_index > 0) {
+					set_insert(set, set_len, curindex + ((insert_index - 1) * table_->NumBuckets()), curkey);
+
+					num_items_++;
+					return Ok;
+				}
+				insert_index = -insert_index;
+
+				uint64_t location = curindex + ((insert_index - 1) * table_->NumBuckets()), nextkey;
+				set_query(set, set_len, location, &nextkey);
+
+				set_delete(set, set_len, location);
+				set_insert(set, set_len, location, curkey);
 
 				curkey = nextkey;
 				curindex = AltIndexFromKey(curindex, curkey);
@@ -283,7 +475,7 @@ namespace cuckoofilter {
 			
 			for (size_t j = 0; j < 4; j++) {
 				uint64_t location_data = index + (j * table_->NumBuckets());
-				slice location = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer);
+				slice location = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer, 0);
 				splinterdb_lookup(backing_map, location, bm_result);
 
 				if (!splinterdb_lookup_found(bm_result)) continue;
@@ -303,6 +495,34 @@ namespace cuckoofilter {
 				if (keys[j] == 0) break;
 				table_->UpdateTag(index, j, GenerateTagHash(keys[j], index));
 			}*/
+
+			return Ok;
+		}
+
+	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::AdaptUsingSet(const ItemType key, set_node *set, uint64_t set_len) {
+			uint64_t i1, i2, index;
+			uint64_t tag1, tag2;
+
+			i1 = GenerateIndexHash(key);
+			tag1 = GenerateTagHash(key, i1);
+			i2 = GenerateAltIndexHash(key, i1);
+			tag2 = GenerateTagHash(key, i2);
+			if (victim_.used && ((tag1 == victim_.tag && i1 == victim_.index) || (tag2 == victim_.tag && i2 == victim_.index))) return Ok;
+
+			if (table_->FindTagInBucket(i1, tag1)) index = i1;
+			else {
+				assert(table_->FindTagInBucket(i2, tag2));
+				index = i2;
+			}
+			
+			IncrHashSel(index);
+			
+			for (size_t j = 0; j < 4; j++) {
+				uint64_t orig_key;
+				if (!set_query(set, set_len, index + (j * table_->NumBuckets()), &orig_key)) continue;
+				table_->UpdateTag(index, j, GenerateTagHash(orig_key, index));
+			}
 
 			return Ok;
 		}
@@ -331,7 +551,7 @@ namespace cuckoofilter {
 		}
 
 	template <typename ItemType, size_t bits_per_item, template <size_t> class TableType, typename HashFamily>
-		uint64_t CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::ContainReturn(const ItemType key) const {
+		Status CuckooFilter<ItemType, bits_per_item, TableType, HashFamily>::ContainReturn(const ItemType key, uint64_t *ret_location) const {
 			bool found = false;
 			uint64_t i1, i2;
 			uint64_t tag1, tag2;
@@ -345,11 +565,17 @@ namespace cuckoofilter {
 
 			found = victim_.used && ((tag1 == victim_.tag && i1 == victim_.index) ||
 				(tag2 == victim_.tag && i2 == victim_.index));
-			if (found) return 0;
+			if (found) return NotFound; // The victim will not be able to adapt
 			int insert_index;
-			if ((insert_index = table_->FindTagInBucket(i1, tag1))) return i1 + (insert_index * table_->NumBuckets());
-			if ((insert_index = table_->FindTagInBucket(i2, tag2))) return i2 + (insert_index * table_->NumBuckets());
-			return 0;
+			if ((insert_index = table_->FindTagLocationInBucket(i1, tag1)) >= 0) {
+				*ret_location = i1 + (insert_index * table_->NumBuckets());
+				return Ok;
+			}
+			if ((insert_index = table_->FindTagLocationInBucket(i2, tag2)) >= 0) {
+				*ret_location = i2 + (insert_index * table_->NumBuckets());
+				return Ok;
+			}
+			return NotFound;
 		}
 
 
@@ -368,13 +594,13 @@ namespace cuckoofilter {
 			if ((j = table_->DeleteTagFromBucket(i1, tag1)) != 0) {
 				num_items_--;
 				uint64_t location_data = i1 + (j * table_->NumBuckets());
-				slice location = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer);
+				slice location = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer, 0);
 				splinterdb_delete(backing_map, location);
 				goto TryEliminateVictim;
 			} else if ((j = table_->DeleteTagFromBucket(i2, tag2)) != 0) {
 				num_items_--;
 				uint64_t location_data = i2 + (j * table_->NumBuckets());
-				slice location = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer);
+				slice location = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer, 0);
 				splinterdb_delete(backing_map, location);
 				goto TryEliminateVictim;
 			} else if (victim_.used && ((tag1 == victim_.tag && i1 == victim_.index) ||

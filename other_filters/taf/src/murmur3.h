@@ -16,6 +16,8 @@ extern "C" {
 
 //-----------------------------------------------------------------------------
 
+uint64_t MurmurHash64A (const void *key, int len, unsigned int seed);
+
 void MurmurHash3_x86_32 (const void *key, int len, uint32_t seed, void *out);
 
 void MurmurHash3_x86_128(const void *key, int len, uint32_t seed, void *out);

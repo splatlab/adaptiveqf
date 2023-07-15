@@ -1158,7 +1158,7 @@ static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_in
 	/*uint64_t hash_bucket_lock_offset  = hash_bucket_index % NUM_SLOTS_TO_LOCK;*/
 
 	//if (hash_bucket_index / 64 == 14259) record_break(qf, "insert start", hash_bucket_index / 64, hash_bucket_block_offset);
-	if (hash_bucket_index == 1028) bp();
+	//if (hash_remainder == 65 && hash_bucket_index / 64 == 6960) bp();
 	
 	//printf("remainder = %lu   \t index = %lu\n", hash_remainder, hash_bucket_index);
 

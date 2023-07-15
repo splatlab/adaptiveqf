@@ -95,6 +95,7 @@ class CuckooFilter {
     }
     victim_.used = false;
     table_ = new TableType<bits_per_item>(num_buckets);
+    printf("%lu %lu %f\n", assoc, num_buckets, frac);
   }
 
   ~CuckooFilter() { delete table_; }

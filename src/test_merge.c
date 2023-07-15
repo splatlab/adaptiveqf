@@ -29,7 +29,7 @@ uint64_t rand_uniform(uint64_t max) {
   if (max <= RAND_MAX) return rand() % max;
   uint64_t a = rand();
   uint64_t b = rand();
-  a |= (b << 32);
+  a |= (b << 31);
   return a % max;
 }
 
@@ -160,7 +160,7 @@ int insert_key(QF *qf, ilist **htab, uint64_t key, int count) {
 int main(int argc, char **argv)
 {
 	if (argc < 4) {
-                fprintf(stderr, "Please specify \nthe log of the number of slots in the merged QF\nthe number of remainder bits in the QF\nthe load factor of the merged QF\n");
+                fprintf(stderr, "Please specify \nthe log of the number of slots in the final merged QF\nthe number of remainder bits in the QF\nthe load factor of the merged QF\n");
                 // ./test 16 7 $((1 << 15)) 1000000 1 0
                 exit(1);
         }
@@ -178,45 +178,52 @@ int main(int argc, char **argv)
         uint64_t rbits = atoi(argv[2]);
         double load_factor = atof(argv[3]);
 
+	printf("initializing filters...\n");
 	QF qfa, qfb, qfc;
-
-	assert(qf_malloc(&qfa, 1 << (qbits - 1), qbits + rbits - 1, 0, QF_HASH_INVERTIBLE, 0));
-	assert(qf_malloc(&qfb, 1 << (qbits - 1), qbits + rbits - 1, 0, QF_HASH_INVERTIBLE, 0));
-	assert(qf_malloc(&qfc, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
-
+	qf_malloc(&qfa, 1 << (qbits - 1), qbits + rbits - 1, 0, QF_HASH_INVERTIBLE, 0);
+	qf_malloc(&qfb, 1 << (qbits - 1), qbits + rbits - 1, 0, QF_HASH_INVERTIBLE, 0);
+	qf_malloc(&qfc, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0);
 	qf_set_auto_resize(&qfa, false);
 	qf_set_auto_resize(&qfb, false);
 	qf_set_auto_resize(&qfc, false);
 
-	clock_t start_time = clock(), end_time;
-
 	uint64_t target_fill = (1 << (qbits - 1)) * load_factor;
-	int i = 0;
-	for (; qfa.metadata->noccupied_slots < target_fill; i++) {
-		uint64_t j = rand_uniform(-1);
-		insert_key(&qfa, htaba, j, 1);
+	int i = 0, j = 0;
+
+	printf("generating insert sets...\n");
+	uint64_t *insert_set_a = malloc(target_fill * sizeof(uint64_t));
+	RAND_bytes((void*)insert_set_a, target_fill * sizeof(uint64_t));
+	uint64_t *insert_set_b = malloc(target_fill * sizeof(uint64_t));
+	RAND_bytes((void*)insert_set_b, target_fill * sizeof(uint64_t));
+
+	printf("performing inserts...\n");
+	struct timeval timecheck;
+	gettimeofday(&timecheck, NULL);
+	uint64_t start_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec, end_time;
+	clock_t start_clock = clock(), end_clock;
+	for (i = 0; qfa.metadata->noccupied_slots < target_fill; i++) {
+		insert_key(&qfa, htaba, insert_set_a[i], 1);
 		//if (!qf_insert_ret(&qfa, j, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK)) i--;
 	}
-	for (; qfb.metadata->noccupied_slots < target_fill; i++) {
-		uint64_t j = rand_uniform(-1);
-		insert_key(&qfb, htabb, j, 1);
+	for (j = 0; qfb.metadata->noccupied_slots < target_fill; j++) {
+		insert_key(&qfb, htabb, insert_set_b[j], 1);
 		//if (!qf_insert_ret(&qfb, j, 1, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH | QF_NO_LOCK)) i--;
 	}
+	end_clock = clock();
+	gettimeofday(&timecheck, NULL);
+	end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 
-	//start_time = clock();
+	printf("insert time: %f sec\n", (double)(end_time - start_time) / 1000000);
+	printf("time per insert: %f usec\n", (double)(end_time - start_time) / (i + j));
+	printf("insert cpu time: %f sec\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
+	printf("cpu time per insert: %f usec\n", (double)(end_clock - start_clock) / (i + j));
+
+	printf("merging...\n");
+	start_clock = clock();
 	qf_merge(&qfa, &qfb, &qfc);
-	//clock_t end_time = clock();
+	end_clock = clock();
 
-	ilist *ll;
-	ilist_iter it;
-	for (ll = sglib_hashed_ilist_it_init(&it, htaba); ll != NULL; ll = sglib_hashed_ilist_it_next(&it)) {
-		sglib_hashed_ilist_add(htabb, ll);
-	}
-	end_time = clock();
-
-	snapshot(&qfc);
-
-	printf("total time: %ld\n", end_time - start_time);
-	printf("time per item: %f\n", (double)(end_time - start_time) / i);
+	printf("merge cpu time: %f sec\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
+	printf("cpu time per merge: %f usec\n", (double)(end_clock - start_clock) / (i + j));
 }
 

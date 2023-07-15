@@ -16,7 +16,7 @@ LIBOBJECTS = \
 HEADERS = $(wildcard src/*.h)
 ALIB = libcuckoofilter.a
 
-TEST = test_splinter_ops test_splinter_throughput #test_churn test_ext_throughput #test test_fp test_bits test_micro test_fill_varied_throughput
+TEST = test_splinter_ops test_splinter_throughput test_splinter_zipfian_histogram test_splinter_adversarial test_micro_throughput #test_acf_ops #test_churn test_ext_throughput #test test_fp test_bits test_micro test_fill_varied_throughput
 
 all: $(TEST)
 
@@ -47,8 +47,20 @@ test_churn: example/test_churn.o $(LIBOBJECTS)
 test_splinter_ops: example/test_splinter_ops.o $(LIBOBJECTS)
 	$(CC) example/test_splinter_ops.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
+test_splinter_zipfian_histogram: example/test_splinter_zipfian_histogram.o $(LIBOBJECTS)
+	$(CC) example/test_splinter_zipfian_histogram.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
 test_splinter_throughput: example/test_splinter_throughput.o $(LIBOBJECTS)
 	$(CC) example/test_splinter_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_splinter_adversarial: example/test_splinter_adversarial.o $(LIBOBJECTS)
+	$(CC) example/test_splinter_adversarial.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_acf_ops: example/test_acf_ops.o $(LIBOBJECTS)
+	$(CC) example/test_acf_ops.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_micro_throughput: example/test_micro_throughput.o $(LIBOBJECTS)
+	$(CC) example/test_micro_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
 %.o: %.cc ${HEADERS} Makefile
 	$(CC) $(CFLAGS) $< -o $@

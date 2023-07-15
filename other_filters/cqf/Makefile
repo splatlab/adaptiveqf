@@ -1,4 +1,4 @@
-CTARGETS=test_threadsafe test_pc bm test_hash_accesses #test_fill_varied_throughput #test
+CTARGETS=test_splinter_ops test_splinter_throughput test_splinter_zipfian_histogram test_splinter_adversarial test_micro_throughput test_micro_super #test_threadsafe test_pc bm test_hash_accesses #test_fill_varied_throughput #test
 CXXTARGETS=test_ext_throughput test_adversarial
 
 ifdef D
@@ -29,21 +29,29 @@ CXX = g++ -std=c++11
 LD= gcc -std=gnu11
 
 #CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -m64 -I. -Iinclude
-CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -lpthread -lssl -lcrypto -lstxxl -m64 -I. -Iinclude
+CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -lpthread -lssl -lcrypto -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux -DSKIP_BOOL_DEF -D_GNU_SOURCE -m64 -I. -Iinclude
 
-LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm
+LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm -lsplinterdb
 
 #
 # declaration of dependencies
 #
 
-all: $(CTARGETS) $(CXXTARGETS)
+all: $(CTARGETS) #$(CXXTARGETS)
 
 # dependencies between programs and .o files
 
 test:								$(OBJDIR)/test.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o \
 										$(OBJDIR)/partitioned_counter.o
+
+test_micro_throughput:                                                    $(OBJDIR)/test_micro_throughput.o $(OBJDIR)/gqf.o \
+                                                                                $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
+                                                                                $(OBJDIR)/partitioned_counter.o
+
+test_micro_super:                                                    $(OBJDIR)/test_micro_super.o $(OBJDIR)/gqf.o \
+                                                                                $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
+                                                                                $(OBJDIR)/partitioned_counter.o
 
 test_fill_varied_throughput:								$(OBJDIR)/test_fill_varied_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o \
@@ -71,6 +79,22 @@ test_ext_throughput:                                                    $(OBJDIR
                                                                                 $(OBJDIR)/partitioned_counter.o
 
 test_adversarial:                                                    $(OBJDIR)/test_adversarial.o $(OBJDIR)/gqf.o \
+                                                                                $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
+                                                                                $(OBJDIR)/partitioned_counter.o
+
+test_splinter_ops:                                                    $(OBJDIR)/test_splinter_ops.o $(OBJDIR)/gqf.o \
+                                                                                $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
+                                                                                $(OBJDIR)/partitioned_counter.o
+
+test_splinter_throughput:                                                    $(OBJDIR)/test_splinter_throughput.o $(OBJDIR)/gqf.o \
+                                                                                $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
+                                                                                $(OBJDIR)/partitioned_counter.o
+
+test_splinter_zipfian_histogram:                                                    $(OBJDIR)/test_splinter_zipfian_histogram.o $(OBJDIR)/gqf.o \
+                                                                                $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
+                                                                                $(OBJDIR)/partitioned_counter.o
+
+test_splinter_adversarial:                                                    $(OBJDIR)/test_splinter_adversarial.o $(OBJDIR)/gqf.o \
                                                                                 $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
                                                                                 $(OBJDIR)/partitioned_counter.o
 

@@ -1,32 +1,85 @@
-SRCDIR=src
-OBJDIR=obj
-CXX=g++
+CC = g++
+AR = ar
+PREFIX=/usr/local
 
-NO_COLOR=\x1b[0m
-OK_COLOR=\x1b[32;01m
-ERROR_COLOR=\x1b[31;01m
-WARN_COLOR=\x1b[33;01m
-OK_STRING=$(OK_COLOR)[OK]$(NO_COLOR)
+# Uncomment one of the following to switch between debug and opt mode
+#OPT = -DNDEBUG -Ofast #-pg
+OPT = -g -ggdb
 
-CFLAGS= -msse4.2 -Wall -Wuninitialized -g -std=c++0x
-EXE= acf2x4 acf4x1
-OBJ_MAIN=$(EXE:%=$(OBJDIR)/%.o )
-SRC=$(shell ls -R $(SRCDIR)/*.c*)
-OBJ=$(SRC:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
-OBJ_COMMON=$(filter-out $(OBJ_MAIN),$(OBJ))
+CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux $(OPT)
 
+LDFLAGS+= -Wall -lpthread -lssl -lcrypto -lstxxl -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux
 
-all: $(EXE) 
- 
-$(EXE): $(OBJ)
-	@$(CXX) $(OBJDIR)/$@.o $(OBJ_COMMON) -o $@    
-	@echo -e '$(OK_COLOR)[*] Created executable  $@ $(NO_COLOR)'
+LIBOBJECTS = \
+	./src/hashutil.o \
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.cpp
-	@$(CXX) $(CFLAGS) -c $< -o $@    
-	@echo "[*] Compiled" $<
+HEADERS = $(wildcard src/*.h)
+ALIB = libcuckoofilter.a
+
+TEST = test_micro_write test_micro_read #test_splinter_ops test_splinter_throughput test_splinter_zipfian_histogram test_splinter_adversarial test_micro_throughput #test_acf_ops #test_churn test_ext_throughput #test test_fp test_bits test_micro test_fill_varied_throughput
+
+all: $(TEST)
 
 clean:
-	@rm -f $(EXE) $(OBJ)
-	@echo "[*] Directory $(CURDIR) cleaned"
+	rm -f $(TEST) */*.o
 
+test: example/test.o $(LIBOBJECTS) 
+	$(CC) example/test.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_fill_varied_throughput: example/test_fill_varied_throughput.o $(LIBOBJECTS) 
+	$(CC) example/test_fill_varied_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_fp: example/test_fp.o $(LIBOBJECTS) 
+	$(CC) example/test_fp.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_bits: example/test_bits.o $(LIBOBJECTS)
+	$(CC) example/test_bits.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_micro: example/test_micro.o $(LIBOBJECTS)
+	$(CC) example/test_micro.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_ext_throughput: example/test_ext_throughput.o $(LIBOBJECTS)
+	$(CC) example/test_ext_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_churn: example/test_churn.o $(LIBOBJECTS)
+	$(CC) example/test_churn.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_splinter_ops: example/test_splinter_ops.o $(LIBOBJECTS)
+	$(CC) example/test_splinter_ops.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_splinter_zipfian_histogram: example/test_splinter_zipfian_histogram.o $(LIBOBJECTS)
+	$(CC) example/test_splinter_zipfian_histogram.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_splinter_throughput: example/test_splinter_throughput.o $(LIBOBJECTS)
+	$(CC) example/test_splinter_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_splinter_adversarial: example/test_splinter_adversarial.o $(LIBOBJECTS)
+	$(CC) example/test_splinter_adversarial.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_acf_ops: example/test_acf_ops.o $(LIBOBJECTS)
+	$(CC) example/test_acf_ops.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_micro_throughput: example/test_micro_throughput.o $(LIBOBJECTS)
+	$(CC) example/test_micro_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_micro_write: example/test_micro_write.o $(LIBOBJECTS)
+	$(CC) example/test_micro_write.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_micro_read: example/test_micro_read.o $(LIBOBJECTS)
+	$(CC) example/test_micro_read.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+%.o: %.cc ${HEADERS} Makefile
+	$(CC) $(CFLAGS) $< -o $@
+
+$(ALIB): $(LIBOBJECTS)
+	$(AR) rcs $@ $(LIBOBJECTS)
+
+.PHONY: install
+install: $(ALIB)
+	install -D -m 0755 $(HEADERS) -t $(DESTDIR)$(PREFIX)/include/cuckoofilter
+	install -D -m 0755 $< -t $(DESTDIR)$(PREFIX)/lib
+
+.PHONY: uninstall
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/lib/$(ALIB)
+	rm -rf $(DESTDIR)$(PREFIX)/include/cuckoofilter

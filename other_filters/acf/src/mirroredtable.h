@@ -40,10 +40,10 @@ namespace cuckoofilter {
 			/*for (size_t i = 0; i < num_buckets_ + kPaddingBuckets; i++) {
 			  keys[i] = new uint64_t[kTagsPerBucket];
 			  }*/
-			keys[0] = new uint64_t[num_buckets_ + kPaddingBuckets];
-			keys[1] = new uint64_t[num_buckets_ + kPaddingBuckets];
-			keys[2] = new uint64_t[num_buckets_ + kPaddingBuckets];
-			keys[3] = new uint64_t[num_buckets_ + kPaddingBuckets];
+			//keys[0] = new uint64_t[num_buckets_ + kPaddingBuckets];
+			//keys[1] = new uint64_t[num_buckets_ + kPaddingBuckets];
+			//keys[2] = new uint64_t[num_buckets_ + kPaddingBuckets];
+			//keys[3] = new uint64_t[num_buckets_ + kPaddingBuckets];
 		}
 
 		~MirroredTable() { 
@@ -235,6 +235,16 @@ namespace cuckoofilter {
 				}
 				return false;
 			}
+		}
+
+		// Returns the index in the bucket where the tag was found, -1 if tag not found
+		inline int FindTagLocationInBucket(const size_t i, const uint64_t tag) const {
+			for (size_t j = 0; j < kTagsPerBucket; j++) {
+				if (ReadTag(i, j) == tag) {
+					return j;
+				}
+			}
+			return -1;
 		}
 
 		inline int DeleteTagFromBucket(const size_t i, const uint64_t tag) {

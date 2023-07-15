@@ -6,9 +6,9 @@ PREFIX=/usr/local
 OPT = -DNDEBUG -Ofast
 #OPT = -g -ggdb -pg
 
-CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ $(OPT)
+CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux $(OPT)
 
-LDFLAGS+= -Wall -lpthread -lssl -lcrypto -lstxxl
+LDFLAGS+= -Wall -lpthread -lssl -lcrypto -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux
 
 LIBOBJECTS = \
 	./src/hashutil.o \
@@ -16,7 +16,7 @@ LIBOBJECTS = \
 HEADERS = $(wildcard src/*.h)
 ALIB = libcuckoofilter.a
 
-TEST = test test_hash_accesses test_ext_throughput
+TEST = test test_hash_accesses test_splinter_ops test_splinter_throughput test_splinter_zipfian_histogram test_splinter_adversarial test_micro_throughput test_micro_super #test_ext_throughput
 
 all: $(TEST)
 
@@ -26,11 +26,29 @@ clean:
 test: example/test.o $(LIBOBJECTS) 
 	$(CC) example/test.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
+test_micro_throughput: example/test_micro_throughput.o $(LIBOBJECTS) 
+	$(CC) example/test_micro_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_micro_super: example/test_micro_super.o $(LIBOBJECTS) 
+	$(CC) example/test_micro_super.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
 test_hash_accesses: example/test_hash_accesses.o $(LIBOBJECTS) 
 	$(CC) example/test_hash_accesses.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
 test_ext_throughput: example/test_ext_throughput.o $(LIBOBJECTS) 
-	$(CC) example/test_ext_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+	$(CC) example/test_ext_throughput.o $(LIBOBJECTS) $(LDFLAGS) -lstxxl -o $@
+
+test_splinter_ops: example/test_splinter_ops.o $(LIBOBJECTS) 
+	$(CC) example/test_splinter_ops.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_splinter_throughput: example/test_splinter_throughput.o $(LIBOBJECTS) 
+	$(CC) example/test_splinter_throughput.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_splinter_zipfian_histogram: example/test_splinter_zipfian_histogram.o $(LIBOBJECTS) 
+	$(CC) example/test_splinter_zipfian_histogram.o $(LIBOBJECTS) $(LDFLAGS) -o $@
+
+test_splinter_adversarial: example/test_splinter_adversarial.o $(LIBOBJECTS) 
+	$(CC) example/test_splinter_adversarial.o $(LIBOBJECTS) $(LDFLAGS) -o $@
 
 %.o: %.cc ${HEADERS} Makefile
 	$(CC) $(CFLAGS) $< -o $@

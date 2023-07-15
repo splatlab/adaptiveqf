@@ -203,30 +203,31 @@ int main(int argc, char **argv)
 
 	printf("generating inserts...\n");
 	int nkeys = 0.9 * (1 << qbits);
-	uint64_t *keys = calloc(nkeys, sizeof(uint64_t));
+	uint64_t *keys = malloc(nkeys * sizeof(uint64_t));
 	/*for (int i = 0; i < nkeys; i++) {
 		keys[i] = rand();
 	}*/
 	RAND_bytes((unsigned char*)keys, nkeys * sizeof(uint64_t));
 
 	clock_t start_time, end_time;
-	start_time = clock();
 	printf("sorting inserts...\n");
+	start_time = clock();
 	qsort(keys, nkeys, sizeof(uint64_t), cmp);
 
-	printf("bulk inserting...\n");
-	qf_bulk_insert(&qf, keys, nkeys);
 	end_time = clock();
-	snapshot(&qf);
+	uint64_t sort_time = end_time - start_time;
+	printf("time for sorting: %f sec\n", (double)(sort_time) / CLOCKS_PER_SEC);
+	printf("time per item:    %f usec\n", (double)(sort_time) / nkeys);
 
-	printf("verifying results...\n");
-	uint64_t ret_index, ret_hash;
-	int ret_hash_len;
-	for (int i = 0; i < nkeys; i++) {
-		assert(qf_query(&qf, keys[i], &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH));
-	}
+	printf("bulk inserting...\n");
+	start_time = clock();
+	qf_bulk_insert(&qf, keys, nkeys);
 
-	printf("time taken: %ld\n", end_time - start_time);
-	printf("time per item: %f\n", (double)(end_time - start_time) / nkeys);
+	end_time = clock();
+	uint64_t bulk_time = end_time - start_time;
+	printf("time for bulk:    %f sec\n", (double)(bulk_time) / CLOCKS_PER_SEC);
+	printf("time per item:    %f usec\n", (double)(bulk_time) / nkeys);
+
+	printf("total time per item: %f usec\n", (double)(sort_time + bulk_time) / nkeys);
 }
 

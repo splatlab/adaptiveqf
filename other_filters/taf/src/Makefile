@@ -1,5 +1,5 @@
 #compiler
-CC=g++ -std=c++11
+CC=gcc
 #CC = clang	
 
 #put any desired compilation flags here.  Feel free to remove O2 or change to O3 or Ofast	
@@ -49,6 +49,12 @@ utaf: utaf.c
 
 taf: taf.c
 	$(CC) -D TEST_TAF=1 -o taf.o taf.c arcd.c murmur3.c bit_util.c set.c $(CFLAGS) -lssl -lcrypto
+
+taf_sim: taf_sim.c
+	$(CC) -D TEST_TAF_SIM=1 -o taf_sim.o taf_sim.c arcd.c murmur3.c bit_util.c set.c $(CFLAGS) -lssl -lcrypto -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux -D_GNU_SOURCE
+
+splinter_taf: splinter_taf.c
+	$(CC) -D TEST_SPLINTER_TAF=1 -o splinter_taf.o splinter_taf.c arcd.c murmur3.c bit_util.c set.c $(DEBUGFLAGS) -lssl -lcrypto -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux -D_GNU_SOURCE
 
 arcd: arcd.c
 	$(CC) -D TEST_ARCD=1 -o arcd.o arcd.c $(DEBUGFLAGS)

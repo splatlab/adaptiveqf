@@ -7,6 +7,8 @@
 #include <iostream>
 #include <vector>
 
+#include <openssl/rand.h>
+
 using cuckoofilter::CuckooFilter;
 
 #define HASH_SET_SEED 26571997
@@ -165,32 +167,24 @@ int main(int argc, char **argv) {
   }
   end_time = clock();
   printf("time per insert: %f\n", (double)(end_time - start_time) / num_inserted);
-  return 0;
 
-  uint64_t *query_set = (uint64_t*)calloc(total_items, sizeof(uint64_t));
-  for (size_t i = 0; i < total_items; i++) {
-	  //query_set[i] = rand_zipfian(1.5f, 1lu << 30);
-	  query_set[i] = i + total_items;
-  }
+  uint64_t total_queries = 100000000ull;
+  uint64_t *query_set = new uint64_t[total_queries];
+  RAND_bytes((unsigned char*)query_set, total_items * sizeof(uint64_t));
+
+  printf("starting queries...\n");
 
   // Check non-existing items, a few false positives expected
   start_time = clock();
-  size_t total_queries = 0;
   size_t false_queries = 0;
-  /*for (size_t i = total_items; i < 2 * total_items; i++) {
-    if (filter.Contain(i) == cuckoofilter::Ok) {
-      false_queries++;
-    }
-    total_queries++;
-  }*/
-  for (size_t i = 0; i < total_items; i++) {
+  for (size_t i = 0; i < total_queries; i++) {
     if (filter.Contain(query_set[i]) == cuckoofilter::Ok) {
       false_queries++;
     }
     total_queries++;
   }
   end_time = clock();
-  printf("time per query: %f\n", (double)(end_time - start_time) / total_queries);
+  printf("query throughput: %f\n", (double)(total_queries) * CLOCKS_PER_SEC / (end_time - start_time));
 
   // Output the measured false positive rate
   std::cout << "false positive rate is "
