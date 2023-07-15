@@ -1,4 +1,4 @@
-# cqf
+# AQF
 Adaptive Quotient Filter (AQF)
 ```
 ```
@@ -51,8 +51,3 @@ Contributing
 ------------
 Contributions via GitHub pull requests are welcome.
 
-
-Authors
--------
-- Prashant Pandey <ppandey@cs.stonybrook.edu>
-- Rob Johnson <rob@cs.stonybrook.edu>
