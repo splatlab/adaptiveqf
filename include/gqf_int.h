@@ -1,12 +1,3 @@
-/*
- * ============================================================================
- *
- *        Authors:  Prashant Pandey <ppandey@cs.stonybrook.edu>
- *                  Rob Johnson <robj@vmware.com>   
- *
- * ============================================================================
- */
-
 #ifndef _GQF_INT_H_
 #define _GQF_INT_H_
 

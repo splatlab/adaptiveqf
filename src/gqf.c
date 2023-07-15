@@ -1,14 +1,3 @@
-/*
- * ============================================================================
- *
- *        AQF by:   Richard Wen <rwen1@umd.edu>
- *        Modified from CQF <https://github.com/splatlab/cqf>
- *        CQF by:   Prashant Pandey <ppandey@cs.stonybrook.edu>
- *                  Rob Johnson <robj@vmware.com>   
- *
- * ============================================================================
- */
-
 #include <stdlib.h>
 # include <assert.h>
 #include <string.h>

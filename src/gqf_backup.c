@@ -1,12 +1,3 @@
-/*
- * ============================================================================
- *
- *        Authors:  Prashant Pandey <ppandey@cs.stonybrook.edu>
- *                  Rob Johnson <robj@vmware.com>   
- *
- * ============================================================================
- */
-
 #include <stdlib.h>
 # include <assert.h>
 #include <string.h>

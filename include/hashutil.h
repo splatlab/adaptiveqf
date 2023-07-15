@@ -1,12 +1,3 @@
-/*
- * ============================================================================
- *
- *        Authors:  Prashant Pandey <ppandey@cs.stonybrook.edu>
- *                  Rob Johnson <robj@vmware.com>   
- *
- * ============================================================================
- */
-
 #ifndef _HASHUTIL_H_
 #define _HASHUTIL_H_
 

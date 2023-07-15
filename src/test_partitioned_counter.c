@@ -1,12 +1,3 @@
-/*
- * ============================================================================
-*
- *         Author:  Prashant Pandey (), ppandey@cs.stonybrook.edu
- *   Organization:  Stony Brook University
- *
- * ============================================================================
- */
-
 #include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
