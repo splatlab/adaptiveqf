@@ -41,14 +41,14 @@ of select on machine words to work on CPUs older than Haswell.
 
 To build on a Haswell or newer hardware:
 ```bash
- $ make test
- $ ./test
+ $ make test_micro_throughput
+ $ ./test_micro_throughput 26 9 100000000
 ```
 
-To build on an older hardare (older than Haswell):
+To build on an older hardware (older than Haswell):
 ```bash
- $ make NH=1 test
- $ ./test
+ $ make NH=1 test_micro_throughput
+ $ ./test_micro_throughput 26 9 100000000
  ```
 
 Contributing

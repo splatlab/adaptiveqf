@@ -198,7 +198,7 @@ int main(int argc, char **argv)
 	uint64_t num_inserts = nslots * load_factor;//strtoull(argv[3], NULL, 10);
 	uint64_t num_queries = strtoull(argv[3], NULL, 10);
 
-        printf("initializing filter...\n");
+        printf("initializing filter with 26 quotient bits and 9 remainder bits...\n");
         QF qf;
         if (!qf_malloc(&qf, nslots, nhashbits, 0, QF_HASH_INVERTIBLE, 0)) {
                 fprintf(stderr, "Can't allocate CQF.\n");
