@@ -1,12 +1,3 @@
-/*
- * ============================================================================
- *
- *        Authors:  Prashant Pandey <ppandey@cs.stonybrook.edu>
- *                  Rob Johnson <robj@vmware.com>   
- *
- * ============================================================================
- */
-
 #ifndef GQF_WRAPPER_H
 #define GQF_WRAPPER_H
 

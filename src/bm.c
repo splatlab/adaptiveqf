@@ -1,11 +1,3 @@
-/*
- * ============================================================================
- *
- *        Authors:  Prashant Pandey <ppandey@cs.stonybrook.edu>
- *                  Rob Johnson <robj@vmware.com>   
- *
- * ============================================================================
- */
 
 #include <time.h>
 #include <sys/time.h>

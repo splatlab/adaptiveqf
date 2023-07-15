@@ -1,12 +1,3 @@
-/*
- * ============================================================================
- *
- *         Author:  Prashant Pandey (), ppandey@cs.stonybrook.edu
- *   Organization:  Stony Brook University
- *
- * ============================================================================
- */
-
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
