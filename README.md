@@ -15,6 +15,7 @@ Overview
 
 API
 --------
+* 'qf_malloc(nslots, pbits)': initialize an AQF
 * 'qf_insert_ret(item, count)': insert an item to the filter. Returns 0 if the
   item to insert shares a fingerprint with an existing item in the filter.
 * 'insert_and_extend(item, count, other)': insert an item and extend it. Should be called
@@ -26,6 +27,9 @@ API
 * 'qf_remove(item)': remove the item from the filter
 * 'qf_adapt(item, other)': extend the item in the filter. Afterwards, other is
   guaranteed to not be a false positive query unless the two items are identical.
+Functions may need additional parameters for the AQF, flags, and/or return values.
+See src/test_micro_throughput.c for an example of an in-memory reverse map.
+See src/test_splinter_throughput.c for an example using SplinterDB as reverse map.
 
 Build
 -------

@@ -24,18 +24,6 @@
 #include "include/gqf_file.h"
 #include "include/hashutil.h"
 
-void bp2() {
-	return;
-}
-
-uint64_t rand_uniform(uint64_t max) {
-        if (max <= RAND_MAX) return rand() % max;
-        uint64_t a = rand();
-        uint64_t b = rand();
-        a |= (b << 31);
-        return a % max;
-}
-
 double rand_zipfian(double s, double max, uint64_t source) {
 	double p = (double)source / (-1ULL);
 	
@@ -192,10 +180,10 @@ int main(int argc, char **argv)
 {
 	if (argc < 4) {
 		fprintf(stderr, "Please specify \nthe log of the number of slots in the QF [eg. 20]\nthe number of remainder bits in the QF [eg. 9]\nthe number of queries [eg. 100000000]\n");
-		// ./test 16 7 $((1 << 15)) 1000000 disk_throughput_stats.txt 0
+		// eg ./test 26 9 100000000
 		exit(1);
 	}
-	if (argc >= 5) {
+	if (argc >= 5) { // optionally include seed for testing (NOTE: seeding may not work because of RAND_bytes - may need to replace with multiple rand() calls)
 		srand(strtol(argv[4], NULL, 10));
 		printf("running test on seed %ld\n", strtol(argv[4], NULL, 10));
 	}
@@ -204,7 +192,6 @@ int main(int argc, char **argv)
 		printf("running test on seed %ld\n", seed);
 		srand(seed);
 	}
-	printf("reading inputs...\n");
 	uint64_t qbits = atoi(argv[1]);
 	uint64_t rbits = atoi(argv[2]);
 	int max_slots_per_item = (64 - qbits + rbits - 1) / rbits;
@@ -236,9 +223,6 @@ int main(int argc, char **argv)
 	uint64_t i;
 	uint64_t *insert_set = malloc(num_inserts * sizeof(uint64_t));
         RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
-	/*for (i = 0; i < num_inserts; i++) {
-		insert_set[i] = rand_uniform(-1);
-	}*/
 
 	// PERFORM INSERTS
 	uint64_t target_fill = nslots * load_factor;
@@ -257,19 +241,18 @@ int main(int argc, char **argv)
 	for (i = 0; qf.metadata->noccupied_slots < target_fill; i++) {
 		if (!insert_key(&qf, set, set_len, insert_set[i], 1)) break;
 
-		/*if (qf.metadata->noccupied_slots >= measure_point) {
+		if (qf.metadata->noccupied_slots >= measure_point) {
 			fprintf(stderr, "\rperforming insertions... %f%%          ", current_interval * 100);
 
                         current_interval += measure_interval;
                         measure_point = nslots * current_interval;
-                }*/
+                }
 	}
 	gettimeofday(&timecheck, NULL);
 	end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 	end_clock = clock();
 
 	printf("\n");
-
 	printf("time for inserts:      %f sec\n", (double)(end_time - start_time) / 1000000);
 	printf("insert throughput:     %f ops/sec\n", (double)i * 1000000 / (end_time - start_time));
 	printf("cpu time for inserts:  %f sec\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
@@ -281,14 +264,10 @@ int main(int argc, char **argv)
 
 	uint64_t *query_set = malloc(num_queries * sizeof(uint64_t));
 	RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
-	/*for (i = 0; i < num_queries; i++) {
-		query_set[i] = rand_uniform(-1);
-	}*/
-	//unsigned int murmur_seed = rand();
+	unsigned int murmur_seed = rand();
 	for (i = 0; i < num_queries; i++) { // making the distrubution uniform from a limited universe
 		query_set[i] = rand_zipfian(1.5f, 10000000ull, query_set[i]);
-		//query_set[i] = query_set[i] % (1ull << 24);
-		//query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
+		query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
 	}
 
 	current_interval = measure_interval;
@@ -342,8 +321,7 @@ int main(int argc, char **argv)
 	end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 	end_clock = clock();
 
-	printf("\rperforming queries... 100%%           \n");
-
+	printf("\n");
 	printf("time for queries:     %f s\n", (double)(end_time - start_time) / 1000000);
 	printf("query throughput:     %f ops/sec\n", (double)num_queries * 1000000 / (end_time - start_time));
 	printf("cpu time for queries: %f s\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
