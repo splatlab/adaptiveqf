@@ -62,6 +62,13 @@ extern "C" {
 		 hashed. */
 #define QF_KEY_IS_HASH (0x08)
 
+	struct qf_query_result_t {
+		uint64_t count; // the counter of the item
+		uint64_t hash; // the quotient and remainder of the item
+		uint64_t index; // the location of the item in the filter (for use in adaptations)
+		uint64_t intralist_rank; // the rank of the item among items with the same quotient and remainder (for use in the ll_table)
+	} typedef qf_query_result;
+
 	/******************************************
 		 The CQF defines low-level constructor and destructor operations
 		 that are designed to enable the application to manage the memory
@@ -137,7 +144,7 @@ extern "C" {
 	int qf_insert(QF *qf, uint64_t key, uint64_t value, uint64_t count, uint8_t
 								flags);
 	int qf_insert_ret(QF *qf, uint64_t key, uint64_t count, uint64_t *ret_index, uint64_t *ret_hash, int *ret_hash_len, uint8_t flags);
-	int qf_insert_using_ll_table(QF *qf, ll_table *table, uint64_t key, uint64_t count, uint8_t flags);
+	int qf_insert_using_ll_table(QF *qf, uint64_t key, uint64_t count, uint64_t *ret_hash, uint8_t flags);
 	int insert_and_extend(QF *qf, uint64_t index, uint64_t key, uint64_t count, uint64_t other_key, uint64_t *ret_hash, uint64_t *ret_other_hash, uint8_t flags);
 
 	/* Set the counter for this key/value pair to count. 
@@ -183,6 +190,7 @@ extern "C" {
 		 in the QF.  If you want to see others, use an iterator. 
 		 May return QF_COULDNT_LOCK if called with QF_TRY_LOCK.  */
 	uint64_t qf_query(const QF *qf, uint64_t key, uint64_t *ret_index, uint64_t *ret_hash, int *ret_hash_len, uint8_t flags);
+	int qf_query_using_ll_table(const QF *qf, uint64_t key, qf_query_result *query_result, uint8_t flags);
 	int qf_adapt(QF *qf, uint64_t index, uint64_t hash, uint64_t other_hash, uint64_t *ret_hash, uint8_t flags);
 
 	/* Return the number of times key has been inserted, with any value,

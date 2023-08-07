@@ -14,11 +14,13 @@
 #include "include/gqf_int.h"
 #include "include/gqf_file.h"
 #include "include/hashutil.h"
+#include "include/ll_table.h"
 
-#include <splinterdb/splinterdb.h>
 #include <splinterdb/data.h>
-#include <splinterdb/public_platform.h>
 #include <splinterdb/default_data_config.h>
+#include <splinterdb/public_platform.h>
+#include <splinterdb/public_util.h>
+#include <splinterdb/splinterdb.h>
 
 
 #define Kilo (1024UL)
@@ -66,6 +68,17 @@ double rand_zipfian(double s, double max, uint64_t source) {
 	}
 }
 
+int merge_tuples(const data_config *cfg, slice key, message old_message, merge_accumulator *new_message) {
+	if (merge_accumulator_resize(new_message, message_length(old_message) + MAX_VAL_SIZE)) return -1;
+	memcpy(merge_accumulator_data(new_message) + MAX_VAL_SIZE, message_data(old_message), message_length(old_message));
+	return 0;
+}
+
+int merge_tuples_final(const data_config *cfg, slice key, merge_accumulator *oldest_message) {
+	merge_accumulator_set_class(oldest_message, MESSAGE_TYPE_INSERT);
+	return 0;
+}
+
 void pad_data(void *dest, const void *src, const size_t dest_len, const size_t src_len, const int flagged) {
 	assert(dest_len >= src_len);
 	if (flagged) memset(dest, 0xff, dest_len);
@@ -84,61 +97,23 @@ int db_insert(splinterdb *database, const void *key_data, const size_t key_len, 
 	char val_padded[MAX_VAL_SIZE];
 	pad_data(key_padded, key_data, MAX_KEY_SIZE, key_len, flagged);
 	pad_data(val_padded, val_data, MAX_VAL_SIZE, val_len, 0);
-	slice key = slice_create(MAX_KEY_SIZE, key_padded);
-	slice val = slice_create(MAX_VAL_SIZE, val_padded);
+	slice key_slice = slice_create(MAX_KEY_SIZE, key_padded);
+	slice val_slice = slice_create(MAX_VAL_SIZE, val_padded);
 
-	return splinterdb_insert(database, key, val);
+	return splinterdb_update(database, key_slice, val_slice);
 }
 
-splinterdb_lookup_result db_result;
-
-int insert_key(QF *qf, splinterdb *db, uint64_t key, int count, void *buffer) {
-        uint64_t ret_index, ret_hash, ret_other_hash;
-        int ret_hash_len;
-        int ret = qf_insert_ret(qf, key, count, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH);
-        if (ret == QF_NO_SPACE) {
+int insert_key(QF *qf, splinterdb *db, uint64_t key, int count) {
+        uint64_t ret_hash;
+        int ret = qf_insert_using_ll_table(qf, key, count, &ret_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
+        if (ret < 0) {
                 return 0;
         }
-        else if (ret == 0) {
-		uint64_t fingerprint_data = ret_hash | (1ull << ret_hash_len);
-		slice fingerprint = padded_slice(&fingerprint_data, MAX_KEY_SIZE, sizeof(fingerprint_data), buffer, 0);
-		splinterdb_lookup(db, fingerprint, &db_result);
-                if (!splinterdb_lookup_found(&db_result)) {
-                        printf("error:\tfilter claimed to have fingerprint %lu but hashtable could not find it\n", ret_hash);
-                }
-		else {
-			slice result_val;
-			splinterdb_lookup_result_value(&db_result, &result_val);
-			if (memcmp(slice_data(result_val), &key, sizeof(uint64_t)) == 0) {
-				insert_and_extend(qf, ret_index, key, count, key, &ret_hash, &ret_other_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
-			}
-			else {
-				uint64_t orig_key;
-				memcpy(&orig_key, slice_data(result_val), sizeof(uint64_t));
-				int ext_len = insert_and_extend(qf, ret_index, key, count, orig_key, &ret_hash, &ret_other_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
-				if (ext_len == QF_NO_SPACE) {
-					printf("filter is full after insert_and_extend\n");
-					return 0;
-				}
-
-				splinterdb_delete(db, result_val);
-				uint64_t temp = ret_other_hash | (1ull << ext_len);
-				db_insert(db, &temp, sizeof(temp), slice_data(result_val), MAX_VAL_SIZE, 0);
-				temp = ret_hash | (1ull << ext_len);
-				db_insert(db, &temp, sizeof(temp), &key, sizeof(key), 0);
-			}
-                }
-		return 1;
+        else {
+		db_insert(db, &ret_hash, sizeof(ret_hash), &key, sizeof(key), 0);
+                return 1;
         }
-        else if (ret == 1) {
-		uint64_t temp = ret_hash | (1ull << ret_hash_len);
-		db_insert(db, &temp, sizeof(temp), &key, sizeof(key), 0);
-		return 1;
-        }
-        printf("other error: errno %d\n", ret);
-        return 0;
 }
-
 
 int main(int argc, char **argv)
 {
@@ -180,6 +155,8 @@ int main(int argc, char **argv)
 	printf("initializing hash table...\n");
 	data_config data_cfg;
         default_data_config_init(MAX_KEY_SIZE, &data_cfg);
+	data_cfg.merge_tuples = merge_tuples;
+	data_cfg.merge_tuples_final = merge_tuples_final;
         splinterdb_config splinterdb_cfg = (splinterdb_config){
                 .filename   = "db",
                 .cache_size = 64 * Mega,
@@ -192,6 +169,7 @@ int main(int argc, char **argv)
                 printf("Error creating database\n");
                 exit(0);
         }
+	splinterdb_lookup_result db_result;
 	splinterdb_lookup_result_init(database, &db_result, 0, NULL);
 
 	printf("initializing filter...\n");
@@ -201,6 +179,32 @@ int main(int argc, char **argv)
 		abort();
 	}
 	qf_set_auto_resize(&qf, false);
+
+	// UNIT TESTING
+	uint64_t k = 1, v = 2;
+	db_insert(database, &k, sizeof(k), &v, sizeof(v), 0);
+
+	char unit_buffer[128];
+	slice unit_query = padded_slice(&k, MAX_KEY_SIZE, sizeof(k), unit_buffer, 0);
+	splinterdb_lookup(database, unit_query, &db_result);
+	slice unit_result;
+	splinterdb_lookup_result_value(&db_result, &unit_result);
+	assert(slice_length(unit_result) == MAX_VAL_SIZE);
+	memcpy(&v, slice_data(unit_result), MAX_KEY_SIZE);
+	assert(v == 2);
+
+	v = 3;
+	db_insert(database, &k, sizeof(k), &v, sizeof(v), 0);
+	
+	splinterdb_lookup(database, unit_query, &db_result);
+	splinterdb_lookup_result_value(&db_result, &unit_result);
+	assert(slice_length(unit_result) == MAX_VAL_SIZE * 2);
+	memcpy(&v, slice_data(unit_result), MAX_KEY_SIZE);
+	assert(v == 2);
+	memcpy(&v, slice_data(unit_result) + MAX_KEY_SIZE, MAX_KEY_SIZE);
+	assert(v == 3);
+
+	exit(0);
 
 	printf("generating insert set of size %lu...\n", num_inserts);
 	uint64_t i;
@@ -227,7 +231,7 @@ int main(int argc, char **argv)
 	gettimeofday(&timecheck, NULL);
 	uint64_t start_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec, end_time, interval_time = start_time;
 	for (i = 0; qf.metadata->noccupied_slots < target_fill; i++) {
-		if (!insert_key(&qf, database, insert_set[i], 1, buffer)) break;
+		if (!insert_key(&qf, database, insert_set[i], 1)) break;
 
 		if (qf.metadata->noccupied_slots >= measure_point) {
 			gettimeofday(&timecheck, NULL);
@@ -271,6 +275,8 @@ int main(int argc, char **argv)
 	printf("time for inserts:      %f\n", (double)(end_time - start_time) / 1000000);
 	printf("insert throughput:     %f ops/sec\n", (double)i * 1000000 / (end_time - start_time));
 	printf("cpu time for inserts:  %f\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
+
+	exit(0);
 
 	// PERFORM QUERIES
 	printf("\ngenerating query set of size %lu...\n", num_queries);

@@ -1303,7 +1303,6 @@ static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, u
 	}
 
 	uint64_t runend_index = run_end(qf, hash_bucket_index);
-	int rank_in_family = 0;
 	
 	if (might_be_empty(qf, hash_bucket_index) && runend_index == hash_bucket_index) { /* Empty slot */
 		// If slot is empty, insert new element and then call the function again to increment the counter
@@ -1366,7 +1365,6 @@ static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, u
 				else {
 					current_index++;
 					while (is_extension_or_counter(qf, current_index)) current_index++;
-					rank_in_family++;
 				}
 			} while (current_index < qf->metadata->xnslots);
 			if (current_index >= qf->metadata->xnslots) {
@@ -1395,10 +1393,10 @@ static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, u
 		qf_unlock(qf, hash_bucket_index, /*small*/ false);
 	}
 
-	return rank_in_family;
+	return 0;
 }
 
-int qf_insert_using_ll_table(QF *qf, ll_table* table, uint64_t key, uint64_t count, uint8_t flags)
+int qf_insert_using_ll_table(QF *qf, uint64_t key, uint64_t count, uint64_t *ret_hash, uint8_t flags)
 {
 	// We fill up the CQF up to 95% load factor.
 	// This is a very conservative check.
@@ -1427,9 +1425,60 @@ int qf_insert_using_ll_table(QF *qf, ll_table* table, uint64_t key, uint64_t cou
 	//uint64_t hash = ((key << qf->metadata->value_bits) | (value & BITMASK(qf->metadata->value_bits)));// % qf->metadata->range;
 	uint64_t hash = key;
 	
-	int ret = insert_using_ll_table(qf, hash, count, flags);
-	if (ret >= 0) ll_table_insert(table, hash, ret, key);
-	return ret;
+	*ret_hash = hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
+	return insert_using_ll_table(qf, hash, count, flags);
+}
+
+int qf_query_using_ll_table(const QF *qf, uint64_t key, qf_query_result *query_result, uint8_t flags) {
+	// Convert key to hash
+	if (GET_KEY_HASH(flags) != QF_KEY_IS_HASH) {
+		if (qf->metadata->hash_mode == QF_HASH_DEFAULT)
+			key = MurmurHash64A(((void *)&key), sizeof(key), qf->metadata->seed);
+		else if (qf->metadata->hash_mode == QF_HASH_INVERTIBLE)
+			key = hash_64(key, -1ULL);
+	}
+	//uint64_t hash = (key << qf->metadata->value_bits) | (value & BITMASK(qf->metadata->value_bits));
+	uint64_t hash = key;
+	uint64_t hash_remainder   = hash & BITMASK(qf->metadata->bits_per_slot);
+	uint64_t hash_bucket_index = (hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+
+	// If no one wants this slot, we can already say for certain the item is not in the filter
+	if (!is_occupied(qf, hash_bucket_index))
+		return 0;
+
+	// Otherwise, find the start of the run (all the items that want that slot) and parse for the remainder we're looking for
+	uint64_t runstart_index = hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1;
+	if (runstart_index < hash_bucket_index)
+		runstart_index = hash_bucket_index;
+
+	uint64_t current_index = runstart_index;
+	int intralist_rank = 0;
+	do {
+		if (get_slot(qf, current_index) == hash_remainder) { // if first slot matches, check remaining extensions
+			uint64_t ext, count;
+			int ext_len, count_len;
+			get_slot_info(qf, current_index, &ext, &ext_len, &count, &count_len);
+			if (((hash >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) & BITMASK(qf->metadata->bits_per_slot * ext_len)) == ext) { // if extensions match, return the count
+				if (query_result != NULL) {
+					query_result->count = count;
+					query_result->hash = hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
+					query_result->index = current_index;
+					query_result->intralist_rank = intralist_rank;
+				}
+				return 1;
+			}
+			intralist_rank++;
+			if (is_runend(qf, current_index++)) break; // if extensions don't match, stop if end of run, skip to next item otherwise
+			current_index += ext_len + count_len;
+		}
+		else { // if first slot doesn't match, stop if end of run, skip to next item otherwise
+			if (is_runend(qf, current_index++)) break;
+			while (is_extension_or_counter(qf, current_index)) current_index++;
+		}
+	} while (current_index < qf->metadata->xnslots); // stop if reached the end of all items (should never actually reach this point because should stop at the runend)
+
+	return 0;
+	
 }
 
 int insert_and_extend(QF *qf, uint64_t index, uint64_t key, uint64_t count, uint64_t other_key, uint64_t *ret_hash, uint64_t *ret_other_hash, uint8_t flags)

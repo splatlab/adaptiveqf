@@ -1,5 +1,6 @@
 #include "ll_table.h"
 #include "hashutil.h"
+#include <assert.h>
 
 void ll_table_init(ll_table *table, uint64_t size) {
         table->size = size;
@@ -33,7 +34,12 @@ void ll_table_insert(ll_table *table, uint64_t family, uint64_t rank, uint64_t k
 	uint64_t index = MurmurHash64A((void*)(&family), sizeof(uint64_t), table->seed) % table->size;
 
 	ll_list *family_list = NULL;
-	if (table->buckets[index] == NULL) family_list = table->buckets[index] = malloc(sizeof(ll_list));
+	if (table->buckets[index] == NULL) {
+		family_list = table->buckets[index] = malloc(sizeof(ll_list));
+		family_list->family = family;
+		family_list->head = NULL;
+		family_list->next = NULL;
+	}
 	else if (table->buckets[index]->family >= family) {
 		if (table->buckets[index]->family == family) family_list = table->buckets[index];
 		else {
@@ -80,6 +86,7 @@ void ll_table_insert(ll_table *table, uint64_t family, uint64_t rank, uint64_t k
 		new_node->next = ptr->next;
 		ptr->next = new_node;
 	}
+	assert(family_list->family == family);
 
 	table->num_keys++;
 }
