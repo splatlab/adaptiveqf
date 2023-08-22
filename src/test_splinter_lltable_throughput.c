@@ -69,7 +69,7 @@ double rand_zipfian(double s, double max, uint64_t source) {
 }
 
 int merge_tuples(const data_config *cfg, slice key, message old_message, merge_accumulator *new_message) {
-	if (merge_accumulator_resize(new_message, message_length(old_message) + MAX_VAL_SIZE)) return -1;
+	if (!merge_accumulator_resize(new_message, message_length(old_message) + MAX_VAL_SIZE)) return -1;
 	memcpy(merge_accumulator_data(new_message) + MAX_VAL_SIZE, message_data(old_message), message_length(old_message));
 	return 0;
 }
@@ -190,7 +190,7 @@ int main(int argc, char **argv)
 	slice unit_result;
 	splinterdb_lookup_result_value(&db_result, &unit_result);
 	assert(slice_length(unit_result) == MAX_VAL_SIZE);
-	memcpy(&v, slice_data(unit_result), MAX_KEY_SIZE);
+	memcpy(&v, slice_data(unit_result), sizeof(v));
 	assert(v == 2);
 
 	v = 3;
@@ -200,9 +200,9 @@ int main(int argc, char **argv)
 	splinterdb_lookup_result_value(&db_result, &unit_result);
 	assert(slice_length(unit_result) == MAX_VAL_SIZE * 2);
 	memcpy(&v, slice_data(unit_result), MAX_KEY_SIZE);
-	assert(v == 2);
-	memcpy(&v, slice_data(unit_result) + MAX_KEY_SIZE, MAX_KEY_SIZE);
 	assert(v == 3);
+	memcpy(&v, slice_data(unit_result) + MAX_KEY_SIZE, MAX_KEY_SIZE);
+	assert(v == 2);
 
 	exit(0);
 
