@@ -104,15 +104,16 @@ int db_insert(splinterdb *database, const void *key_data, const size_t key_len, 
 }
 
 int insert_key(QF *qf, splinterdb *db, uint64_t key, int count) {
-        uint64_t ret_hash;
-        int ret = qf_insert_using_ll_table(qf, key, count, &ret_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
-        if (ret < 0) {
-                return 0;
-        }
-        else {
+	uint64_t ret_hash;
+	int ret = qf_insert_using_ll_table(qf, key, count, &ret_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
+	if (ret < 0) {
+		return 0;
+	}
+	else {
+		ret_hash = ret_hash | ((1ull << (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) - 1);
 		db_insert(db, &ret_hash, sizeof(ret_hash), &key, sizeof(key), 0);
-                return 1;
-        }
+		return 1;
+	}
 }
 
 int main(int argc, char **argv)
@@ -153,22 +154,24 @@ int main(int argc, char **argv)
 
 
 	printf("initializing hash table...\n");
+	const char *db_path = "db";//"/ssd1/richard/aqf/db";
+	remove(db_path);
 	data_config data_cfg;
-        default_data_config_init(MAX_KEY_SIZE, &data_cfg);
+	default_data_config_init(MAX_KEY_SIZE, &data_cfg);
 	data_cfg.merge_tuples = merge_tuples;
 	data_cfg.merge_tuples_final = merge_tuples_final;
-        splinterdb_config splinterdb_cfg = (splinterdb_config){
-                .filename   = "db",
-                .cache_size = 64 * Mega,
-                .disk_size  = 20 * Giga,
-                .data_cfg   = &data_cfg,
+	splinterdb_config splinterdb_cfg = (splinterdb_config){
+		.filename   = db_path,
+		.cache_size = 64 * Mega,
+		.disk_size  = 20 * Giga,
+		.data_cfg   = &data_cfg,
 		.io_flags   = O_RDWR | O_CREAT | O_DIRECT
-        };
-        splinterdb *database;
-        if (splinterdb_create(&splinterdb_cfg, &database) != 0) {
-                printf("Error creating database\n");
-                exit(0);
-        }
+	};
+	splinterdb *database;
+	if (splinterdb_create(&splinterdb_cfg, &database) != 0) {
+		printf("Error creating database\n");
+		exit(0);
+	}
 	splinterdb_lookup_result db_result;
 	splinterdb_lookup_result_init(database, &db_result, 0, NULL);
 
@@ -180,6 +183,7 @@ int main(int argc, char **argv)
 	}
 	qf_set_auto_resize(&qf, false);
 
+	/*
 	// UNIT TESTING
 	uint64_t k = 1, v = 2;
 	db_insert(database, &k, sizeof(k), &v, sizeof(v), 0);
@@ -204,12 +208,12 @@ int main(int argc, char **argv)
 	memcpy(&v, slice_data(unit_result) + MAX_KEY_SIZE, MAX_KEY_SIZE);
 	assert(v == 2);
 
-	exit(0);
+	exit(0);*/
 
 	printf("generating insert set of size %lu...\n", num_inserts);
 	uint64_t i;
 	uint64_t *insert_set = malloc(num_inserts * sizeof(uint64_t));
-        RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
+	RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
 
 	// PERFORM INSERTS
 	uint64_t target_fill = nslots * load_factor;
@@ -218,8 +222,8 @@ int main(int argc, char **argv)
 	char buffer[MAX_KEY_SIZE + MAX_VAL_SIZE];
 
 	double measure_interval = 0.01f;
-        double current_interval = measure_interval;
-        uint64_t measure_point = target_fill * current_interval, last_point = 0;
+	double current_interval = measure_interval;
+	uint64_t measure_point = target_fill * current_interval, last_point = 0;
 
 	FILE *inserts_fp = fopen("stats_splinter_inserts.csv", "w");
 	fprintf(inserts_fp, "fill through\n");
@@ -255,13 +259,13 @@ int main(int argc, char **argv)
 
 			fprintf(stderr, "\rperforming insertions... %f%%          ", current_interval * 100);
 
-                        current_interval += measure_interval;
-                        last_point = i;
-                        measure_point = nslots * current_interval;
+			current_interval += measure_interval;
+			last_point = i;
+			measure_point = nslots * current_interval;
 
 			gettimeofday(&timecheck, NULL);
 			interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
-                }
+		}
 	}
 	gettimeofday(&timecheck, NULL);
 	end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
@@ -276,8 +280,6 @@ int main(int argc, char **argv)
 	printf("insert throughput:     %f ops/sec\n", (double)i * 1000000 / (end_time - start_time));
 	printf("cpu time for inserts:  %f\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
 
-	exit(0);
-
 	// PERFORM QUERIES
 	printf("\ngenerating query set of size %lu...\n", num_queries);
 	int still_have_space = 1;
@@ -288,14 +290,17 @@ int main(int argc, char **argv)
 	}
 
 	uint64_t *query_set = malloc(num_queries * sizeof(uint64_t));
-	RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
-	for (i = 0; i < num_queries; i++) { // making the distrubution uniform from a limited universe
+	for (int i = 0; i < num_queries; i++) {
+		query_set[i] = rand_uniform(-1ull);
+	}
+	//RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
+	/*for (i = 0; i < num_queries; i++) { // making the distrubution uniform from a limited universe
 		query_set[i] = query_set[i] % (1ull << 24);
 		query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
-	}
+	}*/
 
 	printf("performing queries... 0%%");
-	uint64_t warmup_queries = 49999999ull;
+	uint64_t warmup_queries = 0;//49999999ull;
 
 	current_interval = measure_interval;
 	measure_point = num_queries * current_interval;
@@ -306,34 +311,32 @@ int main(int argc, char **argv)
 	FILE *fprates_fp = fopen("stats_splinter_fprates.csv", "w");
 	fprintf(fprates_fp, "queries fprate\n");
 
+	qf_query_result query_result;
 	uint64_t fp_count = 0;
+	uint64_t faulty_fps = 0;
 	start_clock = clock();
 	gettimeofday(&timecheck, NULL);
 	start_time = interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 	for (i = 0; i < num_queries; i++) {
-		if (qf_query(&qf, query_set[i], &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH)) {
-			uint64_t temp = ret_hash | (1ull << ret_hash_len);
+		if (qf_query_using_ll_table(&qf, query_set[i], &query_result, QF_KEY_IS_HASH)) {
+			uint64_t temp = query_result.hash | ((1ull << (qbits + rbits)) - 1);
 			slice query = padded_slice(&temp, MAX_KEY_SIZE, sizeof(temp), buffer, 0);
 			splinterdb_lookup(database, query, &db_result);
+			if (!splinterdb_lookup_found(&db_result)) {
+				fp_count++;
+				faulty_fps++;
+				continue;
+			}
 			slice result_val;
 			splinterdb_lookup_result_value(&db_result, &result_val);
 
-			if (i >= warmup_queries && memcmp(&query_set[i], slice_data(result_val), sizeof(uint64_t)) != 0) {
+			if (i >= warmup_queries && memcmp(&query_set[i], slice_data(result_val) + query_result.intralist_rank * MAX_KEY_SIZE, sizeof(uint64_t)) != 0) {
 				fp_count++;
 				if (still_have_space) {
 					uint64_t orig_key;
-					memcpy(&orig_key, slice_data(result_val), sizeof(uint64_t));
-					ret_hash_len = qf_adapt(&qf, ret_index, orig_key, query_set[i], &ret_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
-					if (ret_hash_len > 0) {
-						splinterdb_delete(database, result_val);
-						uint64_t temp = ret_hash | (1ull << ret_hash_len);
-						db_insert(database, &temp, sizeof(temp), &orig_key, sizeof(orig_key), 0);
-					}
-					else if (ret_hash_len == QF_NO_SPACE) {
-						still_have_space = 0;
-						fprintf(stderr, "\rfilter is full after %lu queries\n", i);
-						continue;
-					}
+					memcpy(&orig_key, slice_data(result_val) + query_result.intralist_rank * MAX_KEY_SIZE, sizeof(uint64_t));
+					qf_query_using_ll_table(&qf, query_set[i], &query_result, QF_KEY_IS_HASH);
+					//qf_adapt_using_ll_table(&qf, ret_index, orig_key, query_set[i], &ret_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
 					if (qf.metadata->noccupied_slots >= full_point) {
 						still_have_space = 0;
 						fprintf(stderr, "\rfilter is full after %lu queries\n", i);
@@ -351,14 +354,13 @@ int main(int argc, char **argv)
 			}
 			fprintf(stderr, "\rperforming queries... %f%%           ", current_interval * 100);
 
-                        current_interval += measure_interval;
-                        last_point = i;
-                        measure_point = num_queries * current_interval;
+			current_interval += measure_interval;
+			last_point = i;
+			measure_point = num_queries * current_interval;
 
 			gettimeofday(&timecheck, NULL);
-                        interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
-                }
-
+			interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
+		}
 	}
 	gettimeofday(&timecheck, NULL);
 	end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
@@ -375,5 +377,6 @@ int main(int argc, char **argv)
 
 	printf("false positives:      %lu\n", fp_count);
 	printf("false positive rate:  %f%%\n", 100. * fp_count / num_queries);
+	printf("faulty false pos:     %lu\n", faulty_fps);
 }
 

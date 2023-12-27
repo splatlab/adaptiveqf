@@ -1,0 +1,3 @@
+[submodule "external/splinterdb"]
+	path = external/splinterdb
+	url = https://github.com/vmware/splinterdb.git

@@ -93,19 +93,19 @@ int db_insert(splinterdb *database, const void *key_data, const size_t key_len, 
 splinterdb_lookup_result db_result;
 
 int insert_key(QF *qf, splinterdb *db, uint64_t key, int count, void *buffer) {
-        uint64_t ret_index, ret_hash, ret_other_hash;
-        int ret_hash_len;
-        int ret = qf_insert_ret(qf, key, count, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH);
-        if (ret == QF_NO_SPACE) {
-                return 0;
-        }
-        else if (ret == 0) {
+	uint64_t ret_index, ret_hash, ret_other_hash;
+	int ret_hash_len;
+	int ret = qf_insert_ret(qf, key, count, &ret_index, &ret_hash, &ret_hash_len, QF_NO_LOCK | QF_KEY_IS_HASH);
+	if (ret == QF_NO_SPACE) {
+		return 0;
+	}
+	else if (ret == 0) {
 		uint64_t fingerprint_data = ret_hash | (1ull << ret_hash_len);
 		slice fingerprint = padded_slice(&fingerprint_data, MAX_KEY_SIZE, sizeof(fingerprint_data), buffer, 0);
 		splinterdb_lookup(db, fingerprint, &db_result);
-                if (!splinterdb_lookup_found(&db_result)) {
-                        printf("error:\tfilter claimed to have fingerprint %lu but hashtable could not find it\n", ret_hash);
-                }
+		if (!splinterdb_lookup_found(&db_result)) {
+			printf("error:\tfilter claimed to have fingerprint %lu but hashtable could not find it\n", ret_hash);
+		}
 		else {
 			slice result_val;
 			splinterdb_lookup_result_value(&db_result, &result_val);
@@ -127,16 +127,16 @@ int insert_key(QF *qf, splinterdb *db, uint64_t key, int count, void *buffer) {
 				temp = ret_hash | (1ull << ext_len);
 				db_insert(db, &temp, sizeof(temp), &key, sizeof(key), 0);
 			}
-                }
+		}
 		return 1;
-        }
-        else if (ret == 1) {
+	}
+	else if (ret == 1) {
 		uint64_t temp = ret_hash | (1ull << ret_hash_len);
 		db_insert(db, &temp, sizeof(temp), &key, sizeof(key), 0);
 		return 1;
-        }
-        printf("other error: errno %d\n", ret);
-        return 0;
+	}
+	printf("other error: errno %d\n", ret);
+	return 0;
 }
 
 
@@ -179,19 +179,19 @@ int main(int argc, char **argv)
 
 	printf("initializing hash table...\n");
 	data_config data_cfg;
-        default_data_config_init(MAX_KEY_SIZE, &data_cfg);
-        splinterdb_config splinterdb_cfg = (splinterdb_config){
-                .filename   = "db",
-                .cache_size = 64 * Mega,
-                .disk_size  = 20 * Giga,
-                .data_cfg   = &data_cfg,
-		.io_flags   = O_RDWR | O_CREAT | O_DIRECT
-        };
-        splinterdb *database;
-        if (splinterdb_create(&splinterdb_cfg, &database) != 0) {
-                printf("Error creating database\n");
-                exit(0);
-        }
+	default_data_config_init(MAX_KEY_SIZE, &data_cfg);
+	splinterdb_config splinterdb_cfg = (splinterdb_config){
+		.filename   = "db",
+			.cache_size = 64 * Mega,
+			.disk_size  = 20 * Giga,
+			.data_cfg   = &data_cfg,
+			.io_flags   = O_RDWR | O_CREAT | O_DIRECT
+	};
+	splinterdb *database;
+	if (splinterdb_create(&splinterdb_cfg, &database) != 0) {
+		printf("Error creating database\n");
+		exit(0);
+	}
 	splinterdb_lookup_result_init(database, &db_result, 0, NULL);
 
 	printf("initializing filter...\n");
@@ -205,7 +205,7 @@ int main(int argc, char **argv)
 	printf("generating insert set of size %lu...\n", num_inserts);
 	uint64_t i;
 	uint64_t *insert_set = malloc(num_inserts * sizeof(uint64_t));
-        RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
+	RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
 
 	// PERFORM INSERTS
 	uint64_t target_fill = nslots * load_factor;
@@ -214,8 +214,8 @@ int main(int argc, char **argv)
 	char buffer[MAX_KEY_SIZE + MAX_VAL_SIZE];
 
 	double measure_interval = 0.01f;
-        double current_interval = measure_interval;
-        uint64_t measure_point = target_fill * current_interval, last_point = 0;
+	double current_interval = measure_interval;
+	uint64_t measure_point = target_fill * current_interval, last_point = 0;
 
 	FILE *inserts_fp = fopen("stats_splinter_inserts.csv", "w");
 	fprintf(inserts_fp, "fill through\n");
@@ -251,13 +251,13 @@ int main(int argc, char **argv)
 
 			fprintf(stderr, "\rperforming insertions... %f%%          ", current_interval * 100);
 
-                        current_interval += measure_interval;
-                        last_point = i;
-                        measure_point = nslots * current_interval;
+			current_interval += measure_interval;
+			last_point = i;
+			measure_point = nslots * current_interval;
 
 			gettimeofday(&timecheck, NULL);
 			interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
-                }
+		}
 	}
 	gettimeofday(&timecheck, NULL);
 	end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
@@ -283,13 +283,13 @@ int main(int argc, char **argv)
 
 	uint64_t *query_set = malloc(num_queries * sizeof(uint64_t));
 	RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
-	for (i = 0; i < num_queries; i++) { // making the distrubution uniform from a limited universe
+	/*for (i = 0; i < num_queries; i++) { // making the distrubution uniform from a limited universe
 		query_set[i] = query_set[i] % (1ull << 24);
 		query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
-	}
+	}*/
 
 	printf("performing queries... 0%%");
-	uint64_t warmup_queries = 49999999ull;
+	uint64_t warmup_queries = 0;//49999999ull;
 
 	current_interval = measure_interval;
 	measure_point = num_queries * current_interval;
@@ -309,6 +309,10 @@ int main(int argc, char **argv)
 			uint64_t temp = ret_hash | (1ull << ret_hash_len);
 			slice query = padded_slice(&temp, MAX_KEY_SIZE, sizeof(temp), buffer, 0);
 			splinterdb_lookup(database, query, &db_result);
+			/*if (!splinterdb_lookup_found(&db_result)) {
+				fp_count++;
+				continue;
+			}*/
 			slice result_val;
 			splinterdb_lookup_result_value(&db_result, &result_val);
 
@@ -345,13 +349,13 @@ int main(int argc, char **argv)
 			}
 			fprintf(stderr, "\rperforming queries... %f%%           ", current_interval * 100);
 
-                        current_interval += measure_interval;
-                        last_point = i;
-                        measure_point = num_queries * current_interval;
+			current_interval += measure_interval;
+			last_point = i;
+			measure_point = num_queries * current_interval;
 
 			gettimeofday(&timecheck, NULL);
-                        interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
-                }
+			interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
+		}
 
 	}
 	gettimeofday(&timecheck, NULL);
