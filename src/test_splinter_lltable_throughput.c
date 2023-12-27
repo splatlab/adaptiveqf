@@ -313,7 +313,7 @@ int main(int argc, char **argv)
 
 	qf_query_result query_result;
 	uint64_t fp_count = 0;
-	uint64_t faulty_fps = 0;
+	//uint64_t faulty_fps = 0;
 	start_clock = clock();
 	gettimeofday(&timecheck, NULL);
 	start_time = interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
@@ -322,11 +322,11 @@ int main(int argc, char **argv)
 			uint64_t temp = query_result.hash | ((1ull << (qbits + rbits)) - 1);
 			slice query = padded_slice(&temp, MAX_KEY_SIZE, sizeof(temp), buffer, 0);
 			splinterdb_lookup(database, query, &db_result);
-			if (!splinterdb_lookup_found(&db_result)) {
+			/*if (!splinterdb_lookup_found(&db_result)) {
 				fp_count++;
 				faulty_fps++;
 				continue;
-			}
+			}*/
 			slice result_val;
 			splinterdb_lookup_result_value(&db_result, &result_val);
 
@@ -377,6 +377,6 @@ int main(int argc, char **argv)
 
 	printf("false positives:      %lu\n", fp_count);
 	printf("false positive rate:  %f%%\n", 100. * fp_count / num_queries);
-	printf("faulty false pos:     %lu\n", faulty_fps);
+	//printf("faulty false pos:     %lu\n", faulty_fps);
 }
 
