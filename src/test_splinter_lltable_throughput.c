@@ -69,9 +69,12 @@ double rand_zipfian(double s, double max, uint64_t source) {
 }
 
 int merge_tuples(const data_config *cfg, slice key, message old_message, merge_accumulator *new_message) {
-	assert(merge_accumulator_length(new_message) == MAX_VAL_SIZE);
-	if (!merge_accumulator_resize(new_message, message_length(old_message) + MAX_VAL_SIZE)) return -1;
-	memcpy(merge_accumulator_data(new_message) + MAX_VAL_SIZE, message_data(old_message), message_length(old_message));
+	int new_message_len = merge_accumulator_length(new_message);
+	if (!merge_accumulator_resize(new_message, message_length(old_message) + new_message_len)) return -1;
+	memcpy(merge_accumulator_data(new_message) + new_message_len, message_data(old_message), message_length(old_message));
+	if (merge_accumulator_length(new_message) > 2000) {
+		printf("%lu\n", merge_accumulator_length(new_message));
+	}
 	return 0;
 }
 
@@ -104,6 +107,12 @@ int db_insert(splinterdb *database, const void *key_data, const size_t key_len, 
 	return splinterdb_update(database, key_slice, val_slice);
 }
 
+int bp_count = 0;
+void bp() {
+	printf("%d\n", bp_count);
+	bp_count++;
+}
+
 int insert_key(QF *qf, splinterdb *db, uint64_t key, int count) {
 	uint64_t ret_hash;
 	int ret = qf_insert_using_ll_table(qf, key, count, &ret_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
@@ -111,7 +120,7 @@ int insert_key(QF *qf, splinterdb *db, uint64_t key, int count) {
 		return 0;
 	}
 	else {
-		ret_hash = ret_hash | ((1ull << (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) - 1);
+		ret_hash = ret_hash & ((1ull << (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) - 1);
 		db_insert(db, &ret_hash, sizeof(ret_hash), &key, sizeof(key), 0);
 		return 1;
 	}
@@ -163,7 +172,7 @@ int main(int argc, char **argv)
 	data_cfg.merge_tuples_final = merge_tuples_final;
 	splinterdb_config splinterdb_cfg = (splinterdb_config){
 		.filename   = db_path,
-		.cache_size = 64 * Mega,
+		.cache_size = 512 * Mega,
 		.disk_size  = 20 * Giga,
 		.data_cfg   = &data_cfg,
 		.io_flags   = O_RDWR | O_CREAT | O_DIRECT
@@ -214,7 +223,10 @@ int main(int argc, char **argv)
 	printf("generating insert set of size %lu...\n", num_inserts);
 	uint64_t i;
 	uint64_t *insert_set = malloc(num_inserts * sizeof(uint64_t));
-	RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
+	//RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
+	for (uint64_t j = 0; j < num_inserts; j++) {
+		insert_set[j] = rand_uniform(-1ULL);
+	}
 
 	// PERFORM INSERTS
 	uint64_t target_fill = nslots * load_factor;
@@ -320,7 +332,7 @@ int main(int argc, char **argv)
 	start_time = interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 	for (i = 0; i < num_queries; i++) {
 		if (qf_query_using_ll_table(&qf, query_set[i], &query_result, QF_KEY_IS_HASH)) {
-			uint64_t temp = query_result.hash | ((1ull << (qbits + rbits)) - 1);
+			uint64_t temp = query_result.hash & ((1ull << (qbits + rbits)) - 1);
 			slice query = padded_slice(&temp, MAX_KEY_SIZE, sizeof(temp), buffer, 0);
 			splinterdb_lookup(database, query, &db_result);
 			/*if (!splinterdb_lookup_found(&db_result)) {

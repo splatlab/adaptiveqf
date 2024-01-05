@@ -3,7 +3,6 @@
 *.o
 db
 bm
-test*
 stats*
 .stxxl
 stxxl.*
