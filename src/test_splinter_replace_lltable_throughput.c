@@ -81,9 +81,10 @@ int merge_tuples_final(const data_config *cfg, slice key, merge_accumulator *old
 }
 
 void pad_data(void *dest, const void *src, const size_t dest_len, const size_t src_len, const int flagged) {
-	assert(dest_len >= src_len);
-	if (flagged) memset(dest, 0xff, dest_len);
-	else bzero(dest, dest_len);
+	if (dest_len >= src_len) {
+		if (flagged) memset(dest, 0xff, dest_len);
+		else bzero(dest, dest_len);
+	}
 	memcpy(dest, src, src_len);
 }
 
@@ -101,9 +102,10 @@ int db_insert(splinterdb *database, const void *key_data, const size_t key_len, 
 	slice key_slice = slice_create(MAX_KEY_SIZE, key_padded);
 	slice val_slice = slice_create(MAX_VAL_SIZE, val_padded);
 
-	return splinterdb_update(database, key_slice, val_slice);
+	return splinterdb_insert(database, key_slice, val_slice);
 }
 
+splinterdb_lookup_result db_result;
 int insert_key(QF *qf, splinterdb *db, uint64_t key, int count) {
 	uint64_t ret_hash;
 	int ret = qf_insert_using_ll_table(qf, key, count, &ret_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
@@ -111,8 +113,27 @@ int insert_key(QF *qf, splinterdb *db, uint64_t key, int count) {
 		return 0;
 	}
 	else {
-		ret_hash = ret_hash | ((1ull << (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) - 1);
-		db_insert(db, &ret_hash, sizeof(ret_hash), &key, sizeof(key), 0);
+		uint64_t minirun_id = ret_hash | ((1ull << (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) - 1);
+		if (ret == 0) {
+			db_insert(db, &minirun_id, sizeof(minirun_id), &key, sizeof(key), 0);
+		}
+		else {
+			char buffer[MAX_VAL_SIZE * 8]; // just a safe guess for buffer size
+			slice minirun_id_slice = padded_slice(&minirun_id, MAX_KEY_SIZE, sizeof(minirun_id), buffer, 0);
+			splinterdb_lookup(db, minirun_id_slice, &db_result);
+			assert(splinterdb_lookup_found(&db_result));
+			slice result_val;
+			splinterdb_lookup_result_value(&db_result, &result_val);
+			assert(slice_length(result_val) + MAX_VAL_SIZE <= MAX_VAL_SIZE * 8);
+
+			bzero(buffer, MAX_VAL_SIZE * 8);
+			memcpy(buffer, &minirun_id, sizeof(minirun_id));
+			memcpy(buffer + MAX_VAL_SIZE, slice_data(result_val), slice_length(result_val));
+
+			splinterdb_delete(db, minirun_id_slice);
+			slice new_linked_list_slice = slice_create(slice_length(result_val) + MAX_VAL_SIZE, buffer);
+			splinterdb_insert(db, minirun_id_slice, new_linked_list_slice);
+		}
 		return 1;
 	}
 }
@@ -173,7 +194,6 @@ int main(int argc, char **argv)
 		printf("Error creating database\n");
 		exit(0);
 	}
-	splinterdb_lookup_result db_result;
 	splinterdb_lookup_result_init(database, &db_result, 0, NULL);
 
 	printf("initializing filter...\n");

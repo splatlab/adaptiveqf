@@ -1,5 +1,5 @@
 #include <stdlib.h>
-# include <assert.h>
+#include <assert.h>
 #include <string.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -1304,6 +1304,7 @@ static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, u
 
 	uint64_t runend_index = run_end(qf, hash_bucket_index);
 	
+	int ret_code = 0;
 	if (might_be_empty(qf, hash_bucket_index) && runend_index == hash_bucket_index) { /* Empty slot */
 		// If slot is empty, insert new element and then call the function again to increment the counter
 		set_slot(qf, hash_bucket_index, hash_remainder);
@@ -1353,6 +1354,7 @@ static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, u
 			do {
 				current_remainder = get_slot(qf, current_index);
 				if (current_remainder >= hash_remainder) {
+					if (current_remainder == hash_remainder) ret_code = 1;
 					insert_index = current_index;
 					break;
 				}
@@ -1393,7 +1395,7 @@ static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, u
 		qf_unlock(qf, hash_bucket_index, /*small*/ false);
 	}
 
-	return 0;
+	return ret_code;
 }
 
 int qf_insert_using_ll_table(QF *qf, uint64_t key, uint64_t count, uint64_t *ret_hash, uint8_t flags)

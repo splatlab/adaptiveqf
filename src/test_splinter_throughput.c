@@ -121,7 +121,7 @@ int insert_key(QF *qf, splinterdb *db, uint64_t key, int count, void *buffer) {
 					return 0;
 				}
 
-				splinterdb_delete(db, result_val);
+				splinterdb_delete(db, fingerprint);
 				uint64_t temp = ret_other_hash | (1ull << ext_len);
 				db_insert(db, &temp, sizeof(temp), slice_data(result_val), MAX_VAL_SIZE, 0);
 				temp = ret_hash | (1ull << ext_len);

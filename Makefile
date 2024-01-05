@@ -1,14 +1,16 @@
 CTARGETS=test test_threadsafe test_pc bm test_throughput test_fill_varied_throughput test_near_full test_deletions test_merge test_hash_accesses test_bulk test_whitelist test_resize test_micro_throughput test_micro_write test_micro_read test_lltable_throughput
 CXXTARGETS=test_ext_throughput test_ext_inc_throughput test_zipf_throughput test_ext_churn test_adversarial taf
-SPLTARGETS=test_splinter_ops test_splinter_inserts test_splinter_inserts_2 test_splinter_throughput test_splinter_zipfian_histogram test_splinter_adversarial test_splinter_lltable_throughput
+SPLTARGETS=test_splinter_ops test_splinter_inserts test_splinter_inserts_2 test_splinter_throughput test_splinter_zipfian_histogram test_splinter_adversarial test_splinter_lltable_throughput test_splinter_replace_lltable_throughput
 # test_progress
 
-ifndef D
+ifdef D
 	DEBUG=-g
 	OPT=
+	SPLINTERPATH=external/splinterdb/build/debug/lib
 else
 	DEBUG=
 	OPT=-Ofast -DNDEBUG
+	SPLINTERPATH=external/splinterdb/build/release/lib
 endif
 
 ifdef NH
@@ -30,9 +32,9 @@ CC = gcc -std=gnu11
 CXX = g++ -std=c++11
 LD= gcc -std=gnu11
 
-CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -m64 -I. -Iinclude -Iexternal/splinterdb/target/include -DSPLINTERDB_PLATFORM_DIR=platform_linux -DSKIP_BOOL_DEF -D_GNU_SOURCE -Lexternal/splinterdb/target/lib -lsplinterdb
+CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -m64 -I. -Iinclude -Iexternal/splinterdb/include -DSPLINTERDB_PLATFORM_DIR=platform_linux -DSKIP_BOOL_DEF -D_GNU_SOURCE
 
-LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm -Lexternal/splinterdb/target/lib -lsplinterdb -Wl,-rpath=external/splinterdb/target/lib
+LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm -L$(SPLINTERPATH) -lsplinterdb -Wl,-rpath=$(SPLINTERPATH)
 #LDFLAGS += -L/usr/lib/ -lstxxl
 
 #
@@ -162,6 +164,10 @@ test_splinter_adversarial:							$(OBJDIR)/test_splinter_adversarial.o $(OBJDIR)
 										$(OBJDIR)/partitioned_counter.o
 
 test_splinter_lltable_throughput:							$(OBJDIR)/test_splinter_lltable_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
+										$(OBJDIR)/partitioned_counter.o
+
+test_splinter_replace_lltable_throughput:							$(OBJDIR)/test_splinter_replace_lltable_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
 										$(OBJDIR)/partitioned_counter.o
 
