@@ -1,4 +1,4 @@
-CTARGETS=test test_threadsafe test_pc bm test_throughput test_fill_varied_throughput test_near_full test_deletions test_merge test_hash_accesses test_bulk test_whitelist test_resize test_micro_throughput test_micro_write test_micro_read test_lltable_throughput
+CTARGETS=test_throughput test_splinter_lltable_throughput# test_fill_varied_throughput test_near_full test_deletions test_merge test_hash_accesses test_bulk test_whitelist test_resize test_micro_throughput test_micro_write test_micro_read test_lltable_throughput
 CXXTARGETS=test_ext_throughput test_ext_inc_throughput test_zipf_throughput test_ext_churn test_adversarial taf
 SPLTARGETS=test_splinter_ops test_splinter_inserts test_splinter_inserts_2 test_splinter_throughput test_splinter_zipfian_histogram test_splinter_adversarial test_splinter_lltable_throughput
 # test_progress
@@ -41,19 +41,23 @@ LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm -L$(SPLINTERPA
 # declaration of dependencies
 #
 
-all: $(CTARGETS) $(SPLTARGETS) #$(CXXTARGETS)
+all: $(CTARGETS) #$(SPLTARGETS) #$(CXXTARGETS)
 
 # dependencies between programs and .o files
 
-test:									$(OBJDIR)/test.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+test_unit:								$(OBJDIR)/test_unit.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
 										$(OBJDIR)/partitioned_counter.o
+
+test_throughput:						$(OBJDIR)/test_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/hashutil.o $(OBJDIR)/splinter_util.o $(OBJDIR)/test_driver.o \
+										$(OBJDIR)/partitioned_counter.o $(OBJDIR)/ll_table.o $(OBJDIR)/rand_util.o
 
 test_progress:								$(OBJDIR)/test_progress.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
 										$(OBJDIR)/partitioned_counter.o
 
-test_throughput:							$(OBJDIR)/test_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+test_throughput_old:							$(OBJDIR)/test_throughput_old.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
 										$(OBJDIR)/partitioned_counter.o
 
@@ -113,7 +117,7 @@ test_pc:								$(OBJDIR)/test_partitioned_counter.o $(OBJDIR)/gqf.o \
 										$(OBJDIR)/gqf_file.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
 										$(OBJDIR)/partitioned_counter.o
 
-bm:									$(OBJDIR)/bm.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+bm:										$(OBJDIR)/bm.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
 										$(OBJDIR)/partitioned_counter.o
 
@@ -163,9 +167,9 @@ test_splinter_adversarial:							$(OBJDIR)/test_splinter_adversarial.o $(OBJDIR)
 										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
 										$(OBJDIR)/partitioned_counter.o
 
-test_splinter_lltable_throughput:							$(OBJDIR)/test_splinter_lltable_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
+test_splinter_lltable_throughput:		$(OBJDIR)/test_splinter_lltable_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
+										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o $(OBJDIR)/splinter_util.o \
+										$(OBJDIR)/partitioned_counter.o $(OBJDIR)/rand_util.o
 
 # dependencies between .o files and .h files
 
@@ -183,11 +187,13 @@ $(OBJDIR)/bm.o:								$(LOC_INCLUDE)/gqf_wrapper.h \
 
 # dependencies between .o files and .cc (or .c) files
 
-$(OBJDIR)/gqf.o:					$(LOC_SRC)/gqf.c $(LOC_INCLUDE)/gqf.h
+$(OBJDIR)/gqf.o:						$(LOC_SRC)/gqf.c $(LOC_INCLUDE)/gqf.h
 $(OBJDIR)/gqf_file.o:					$(LOC_SRC)/gqf_file.c $(LOC_INCLUDE)/gqf_file.h
 $(OBJDIR)/hashutil.o:					$(LOC_SRC)/hashutil.c $(LOC_INCLUDE)/hashutil.h
-$(OBJDIR)/partitioned_counter.o:			$(LOC_INCLUDE)/partitioned_counter.h
+$(OBJDIR)/partitioned_counter.o:		$(LOC_INCLUDE)/partitioned_counter.h
 $(OBJDIR)/ll_table.o:					$(LOC_SRC)/ll_table.c $(LOC_INCLUDE)/ll_table.h
+$(OBJDIR)/splinter_util.o:				$(LOC_SRC)/splinter_util.c $(LOC_INCLUDE)/splinter_util.h# $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o
+$(OBJDIR)/test_driver.o:				$(LOC_SRC)/test_driver.c $(LOC_INCLUDE)/test_driver.h# $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o $(OBJDIR)/splinter_util.o
 
 #
 # generic build rules
@@ -215,4 +221,4 @@ $(OBJDIR):
 	@mkdir -p $(OBJDIR)
 
 clean:
-	rm -rf $(OBJDIR) $(CTARGETS) $(CXXTARGETS) core
+	rm -rf $(OBJDIR) $(CTARGETS) $(CXXTARGETS) $(SPLTARGETS) core

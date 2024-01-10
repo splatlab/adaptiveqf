@@ -1454,7 +1454,7 @@ int qf_query_using_ll_table(const QF *qf, uint64_t key, qf_query_result *query_r
 		runstart_index = hash_bucket_index;
 
 	uint64_t current_index = runstart_index;
-	int intralist_rank = 0;
+	int minirun_rank = 0;
 	do {
 		if (get_slot(qf, current_index) == hash_remainder) { // if first slot matches, check remaining extensions
 			uint64_t ext, count;
@@ -1465,11 +1465,11 @@ int qf_query_using_ll_table(const QF *qf, uint64_t key, qf_query_result *query_r
 					query_result->count = count;
 					query_result->hash = hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
 					query_result->index = current_index;
-					query_result->intralist_rank = intralist_rank;
+					query_result->minirun_rank = minirun_rank;
 				}
 				return 1;
 			}
-			intralist_rank++;
+			minirun_rank++;
 			if (is_runend(qf, current_index++)) break; // if extensions don't match, stop if end of run, skip to next item otherwise
 			current_index += ext_len + count_len;
 		}
@@ -2168,8 +2168,8 @@ int qf_adapt(QF *qf, uint64_t index, uint64_t key, uint64_t other_key, uint64_t 
 	return ret;
 }
 
-int qf_adapt_using_ll_table(QF *qf, ll_table *table, uint64_t fp_key, uint8_t flags) {
-	uint64_t hash = fp_key;
+int qf_adapt_using_ll_table(QF *qf, uint64_t orig_key, uint64_t fp_key, uint64_t minirun_rank, uint8_t flags) {
+	uint64_t hash;
 	if (GET_KEY_HASH(flags) != QF_KEY_IS_HASH) {
 		if (qf->metadata->hash_mode == QF_HASH_DEFAULT) {
 			hash = MurmurHash64A(((void *)&fp_key), sizeof(fp_key), qf->metadata->seed);
@@ -2178,33 +2178,33 @@ int qf_adapt_using_ll_table(QF *qf, ll_table *table, uint64_t fp_key, uint8_t fl
 			hash = hash_64(fp_key, -1ULL);
 		}
 	}
+	else hash = fp_key;
 
 	uint64_t hash_remainder = hash & BITMASK(qf->metadata->bits_per_slot);
 	uint64_t hash_bucket_index = (hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
 	if (!is_occupied(qf, hash_bucket_index)) return 0;
 	
 	uint64_t current_index = hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1;
-	int rank_in_family = 0;
+	int curr_minirun_rank = 0;
 
 	uint64_t count_info, hash_info;
 	int count_slots, hash_slots;
 	do {
-		if (get_slot(&qf, current_index) < hash_remainder) {
+		if (get_slot(qf, current_index) < hash_remainder) {
 			while (is_extension_or_counter(qf, ++current_index));
 		}
-		else if (get_slot(&qf, current_index) == hash_remainder) {
+		else if (get_slot(qf, current_index) == hash_remainder) {
 			get_slot_info(qf, current_index, &hash_info, &hash_slots, &count_info, &count_slots);
 
-			if (hash_info == ((hash >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) & BITMASK(hash_slots * qf->metadata->bits_per_slot))) {
-				uint64_t *orig_key = ll_table_query(table, hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot), rank_in_family);
-				qf_adapt(qf, current_index, *orig_key, fp_key, &hash_info, flags);
+			if (curr_minirun_rank == minirun_rank) {
+				qf_adapt(qf, current_index, orig_key, fp_key, &hash_info, flags);
 
 				return 1;
 			}
 
 			if (is_runend(qf, current_index)) break;
 			current_index += count_slots + hash_slots + 1;
-			rank_in_family++;
+			curr_minirun_rank++;
 		}
 		else break;
 	} while (current_index < qf->metadata->xnslots);

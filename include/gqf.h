@@ -66,7 +66,7 @@ extern "C" {
 		uint64_t count; // the counter of the item
 		uint64_t hash; // the quotient and remainder of the item
 		uint64_t index; // the location of the item in the filter (for use in adaptations)
-		uint64_t intralist_rank; // the rank of the item among items with the same quotient and remainder (for use in the ll_table)
+		uint64_t minirun_rank; // the rank of the item among items with the same quotient and remainder (for use in the ll_table)
 	} typedef qf_query_result;
 
 	/******************************************
@@ -192,6 +192,7 @@ extern "C" {
 	uint64_t qf_query(const QF *qf, uint64_t key, uint64_t *ret_index, uint64_t *ret_hash, int *ret_hash_len, uint8_t flags);
 	int qf_query_using_ll_table(const QF *qf, uint64_t key, qf_query_result *query_result, uint8_t flags);
 	int qf_adapt(QF *qf, uint64_t index, uint64_t hash, uint64_t other_hash, uint64_t *ret_hash, uint8_t flags);
+	int qf_adapt_using_ll_table(QF *qf, uint64_t orig_key, uint64_t fp_key, uint64_t minirun_rank, uint8_t flags);
 
 	/* Return the number of times key has been inserted, with any value,
 		 into qf. */

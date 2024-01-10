@@ -14,7 +14,8 @@
 #include "include/gqf_int.h"
 #include "include/gqf_file.h"
 #include "include/hashutil.h"
-#include "include/ll_table.h"
+#include "include/rand_util.h"
+#include "include/splinter_util.h"
 
 #include <splinterdb/data.h>
 #include <splinterdb/default_data_config.h>
@@ -22,108 +23,10 @@
 #include <splinterdb/public_util.h>
 #include <splinterdb/splinterdb.h>
 
-
-#define Kilo (1024UL)
-#define Mega (1024UL * Kilo)
-#define Giga (1024UL * Mega)
-
-#define TEST_DB_NAME "db"
-
-#define MAX_KEY_SIZE 16
-#define MAX_VAL_SIZE 16
-
-uint64_t rand_uniform(uint64_t max) {
-	if (max <= RAND_MAX) return rand() % max;
-	uint64_t a = rand();
-	uint64_t b = rand();
-	a |= (b << 31);
-	return a % max;
-}
-
-double rand_normal(double mean, double sd) {
-	double a = (double)rand() / RAND_MAX;
-	double b = (double)rand() / RAND_MAX;
-	double c = sqrt(-2.0 * log(a)) * cos(2 * M_PI * b) * sd;
-	return c + mean;
-}
-
-double rand_zipfian(double s, double max, uint64_t source) {
-	double p = (double)source / (-1ULL);
-	
-	double pD = p * (12 * (pow(max, -s + 1) - 1) / (1 - s) + 6 + 6 * pow(max, -s) + s - s * pow(max, -s + 1));
-	double x = max / 2;
-	while (true) {
-		double m = pow(x, -s - 2);
-		double mx = m * x;
-		double mxx = mx * x;
-		double mxxx = mxx * x;
-		
-		double b = 12 * (mxxx - 1) / (1 - s) + 6 + 6 * mxx + s - (s * mx) - pD;
-		double c = 12 * mxx - (6 * s * mx) + (m * s * (s + 1));
-		double newx = x - b / c > 1 ? x - b / c : 1;
-		if (abs(newx - x) <= 0.01) { // this is the tolerance for approximation
-			return newx;
-		}
-		x = newx;
-	}
-}
-
-int merge_tuples(const data_config *cfg, slice key, message old_message, merge_accumulator *new_message) {
-	int new_message_len = merge_accumulator_length(new_message);
-	if (!merge_accumulator_resize(new_message, message_length(old_message) + new_message_len)) return -1;
-	memcpy(merge_accumulator_data(new_message) + new_message_len, message_data(old_message), message_length(old_message));
-	if (merge_accumulator_length(new_message) > 2000) {
-		printf("%lu\n", merge_accumulator_length(new_message));
-	}
-	return 0;
-}
-
-int merge_tuples_final(const data_config *cfg, slice key, merge_accumulator *oldest_message) {
-	merge_accumulator_set_class(oldest_message, MESSAGE_TYPE_INSERT);
-	return 0;
-}
-
-void pad_data(void *dest, const void *src, const size_t dest_len, const size_t src_len, const int flagged) {
-	assert(dest_len >= src_len);
-	if (flagged) memset(dest, 0xff, dest_len);
-	else bzero(dest, dest_len);
-	memcpy(dest, src, src_len);
-}
-
-slice padded_slice(const void *data, const size_t dest_len, const size_t src_len, void *buffer, const int flagged) {
-	pad_data(buffer, data, dest_len, src_len, flagged);
-	
-	return slice_create(dest_len, buffer);
-}
-
-int db_insert(splinterdb *database, const void *key_data, const size_t key_len, const void *val_data, const size_t val_len, const int flagged) {
-	char key_padded[MAX_KEY_SIZE];
-	char val_padded[MAX_VAL_SIZE];
-	pad_data(key_padded, key_data, MAX_KEY_SIZE, key_len, flagged);
-	pad_data(val_padded, val_data, MAX_VAL_SIZE, val_len, 0);
-	slice key_slice = slice_create(MAX_KEY_SIZE, key_padded);
-	slice val_slice = slice_create(MAX_VAL_SIZE, val_padded);
-
-	return splinterdb_update(database, key_slice, val_slice);
-}
-
 int bp_count = 0;
 void bp() {
 	printf("%d\n", bp_count);
 	bp_count++;
-}
-
-int insert_key(QF *qf, splinterdb *db, uint64_t key, int count) {
-	uint64_t ret_hash;
-	int ret = qf_insert_using_ll_table(qf, key, count, &ret_hash, QF_NO_LOCK | QF_KEY_IS_HASH);
-	if (ret < 0) {
-		return 0;
-	}
-	else {
-		ret_hash = ret_hash & ((1ull << (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) - 1);
-		db_insert(db, &ret_hash, sizeof(ret_hash), &key, sizeof(key), 0);
-		return 1;
-	}
 }
 
 int main(int argc, char **argv)
@@ -160,25 +63,12 @@ int main(int argc, char **argv)
 	uint64_t num_queries = strtoull(argv[3], NULL, 10);
 	uint64_t num_inc_queries = strtoull(argv[4], NULL, 10);
 
-	unsigned int murmur_seed = rand();
 
-
-	printf("initializing hash table...\n");
-	const char *db_path = "db";//"/ssd1/richard/aqf/db";
-	remove(db_path);
-	data_config data_cfg;
-	default_data_config_init(MAX_KEY_SIZE, &data_cfg);
-	data_cfg.merge_tuples = merge_tuples;
-	data_cfg.merge_tuples_final = merge_tuples_final;
-	splinterdb_config splinterdb_cfg = (splinterdb_config){
-		.filename   = db_path,
-		.cache_size = 512 * Mega,
-		.disk_size  = 20 * Giga,
-		.data_cfg   = &data_cfg,
-		.io_flags   = O_RDWR | O_CREAT | O_DIRECT
-	};
+	printf("initializing database...\n");
+	data_config data_cfg = qf_data_config_init();
+	splinterdb_config splinterdb_cfg = qf_splinterdb_config_init("db", &data_cfg);
 	splinterdb *database;
-	if (splinterdb_create(&splinterdb_cfg, &database) != 0) {
+	if (splinterdb_create(&splinterdb_cfg, &database)) {
 		printf("Error creating database\n");
 		exit(0);
 	}
@@ -188,37 +78,11 @@ int main(int argc, char **argv)
 	printf("initializing filter...\n");
 	QF qf;
 	if (!qf_malloc(&qf, nslots, nhashbits, 0, QF_HASH_INVERTIBLE, 0)) {
-		fprintf(stderr, "Can't allocate CQF.\n");
-		abort();
+		printf("Can't allocate CQF.\n");
+		exit(0);
 	}
 	qf_set_auto_resize(&qf, false);
 
-	/*
-	// UNIT TESTING
-	uint64_t k = 1, v = 2;
-	db_insert(database, &k, sizeof(k), &v, sizeof(v), 0);
-
-	char unit_buffer[128];
-	slice unit_query = padded_slice(&k, MAX_KEY_SIZE, sizeof(k), unit_buffer, 0);
-	splinterdb_lookup(database, unit_query, &db_result);
-	slice unit_result;
-	splinterdb_lookup_result_value(&db_result, &unit_result);
-	assert(slice_length(unit_result) == MAX_VAL_SIZE);
-	memcpy(&v, slice_data(unit_result), sizeof(v));
-	assert(v == 2);
-
-	v = 3;
-	db_insert(database, &k, sizeof(k), &v, sizeof(v), 0);
-	
-	splinterdb_lookup(database, unit_query, &db_result);
-	splinterdb_lookup_result_value(&db_result, &unit_result);
-	assert(slice_length(unit_result) == MAX_VAL_SIZE * 2);
-	memcpy(&v, slice_data(unit_result), MAX_KEY_SIZE);
-	assert(v == 3);
-	memcpy(&v, slice_data(unit_result) + MAX_KEY_SIZE, MAX_KEY_SIZE);
-	assert(v == 2);
-
-	exit(0);*/
 
 	printf("generating insert set of size %lu...\n", num_inserts);
 	uint64_t i;
@@ -248,7 +112,7 @@ int main(int argc, char **argv)
 	gettimeofday(&timecheck, NULL);
 	uint64_t start_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec, end_time, interval_time = start_time;
 	for (i = 0; qf.metadata->noccupied_slots < target_fill; i++) {
-		if (!insert_key(&qf, database, insert_set[i], 1)) break;
+		if (!qf_splinter_insert(&qf, database, insert_set[i], 1)) break;
 
 		if (qf.metadata->noccupied_slots >= measure_point) {
 			gettimeofday(&timecheck, NULL);
@@ -307,6 +171,7 @@ int main(int argc, char **argv)
 		query_set[i] = rand_uniform(-1ull);
 	}
 	//RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
+	//unsigned int murmur_seed = rand();
 	/*for (i = 0; i < num_queries; i++) { // making the distrubution uniform from a limited universe
 		query_set[i] = query_set[i] % (1ull << 24);
 		query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
@@ -335,21 +200,15 @@ int main(int argc, char **argv)
 			uint64_t temp = query_result.hash & ((1ull << (qbits + rbits)) - 1);
 			slice query = padded_slice(&temp, MAX_KEY_SIZE, sizeof(temp), buffer, 0);
 			splinterdb_lookup(database, query, &db_result);
-			/*if (!splinterdb_lookup_found(&db_result)) {
-				fp_count++;
-				faulty_fps++;
-				continue;
-			}*/
 			slice result_val;
 			splinterdb_lookup_result_value(&db_result, &result_val);
 
-			if (i >= warmup_queries && memcmp(&query_set[i], slice_data(result_val) + query_result.intralist_rank * MAX_KEY_SIZE, sizeof(uint64_t)) != 0) {
+			if (i >= warmup_queries && memcmp(&query_set[i], slice_data(result_val) + query_result.minirun_rank * MAX_KEY_SIZE, sizeof(uint64_t)) != 0) {
 				fp_count++;
 				if (still_have_space) {
 					uint64_t orig_key;
-					memcpy(&orig_key, slice_data(result_val) + query_result.intralist_rank * MAX_KEY_SIZE, sizeof(uint64_t));
-					qf_query_using_ll_table(&qf, query_set[i], &query_result, QF_KEY_IS_HASH);
-					//qf_adapt_using_ll_table(&qf, ret_index, orig_key, query_set[i], &ret_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
+					memcpy(&orig_key, slice_data(result_val) + query_result.minirun_rank * MAX_KEY_SIZE, sizeof(uint64_t));
+					qf_adapt_using_ll_table(&qf, orig_key, query_set[i], query_result.minirun_rank, QF_KEY_IS_HASH | QF_NO_LOCK);
 					if (qf.metadata->noccupied_slots >= full_point) {
 						still_have_space = 0;
 						fprintf(stderr, "\rfilter is full after %lu queries\n", i);

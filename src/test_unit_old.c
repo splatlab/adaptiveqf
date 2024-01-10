@@ -17,6 +17,7 @@
 
 #include "sglib.h"
 
+
 uint64_t rand_uniform(uint64_t max) {
   if (max <= RAND_MAX) return rand() % max;
   uint64_t a = rand();
@@ -75,6 +76,7 @@ SGLIB_DEFINE_LIST_PROTOTYPES(ilist, ILIST_COMPARATOR, next)
 SGLIB_DEFINE_LIST_FUNCTIONS(ilist, ILIST_COMPARATOR, next)
 SGLIB_DEFINE_HASHED_CONTAINER_PROTOTYPES(ilist, HASH_TABLE_SIZE, ilist_hash_function)
 SGLIB_DEFINE_HASHED_CONTAINER_FUNCTIONS(ilist, HASH_TABLE_SIZE, ilist_hash_function)
+
 
 void test_insertions(int qbits, int rbits) {
 	QF qf;
@@ -187,7 +189,7 @@ void test_merge_2() {
 	assert(qf_malloc(&qfb, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
 	assert(qf_malloc(&qfc, 1 << qbits, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0));
 
-	uint64_t ret_index, ret_hash, ret_other_hash;
+	uint64_t ret_index, ret_hash;
 	int ret_hash_len;
 
 	double load = 0.4f;

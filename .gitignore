@@ -1,10 +1,17 @@
+*
+!*.*
+!*/
+
 *.csv
 *.txt
 *.o
+
 db
 bm
 stats*
+
 .stxxl
 stxxl.*
+
 obj/
 external/
