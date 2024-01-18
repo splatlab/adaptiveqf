@@ -4,11 +4,15 @@ CC=gcc
 
 #put any desired compilation flags here.  Feel free to remove O2 or change to O3 or Ofast	
 #make sure to run "make clean" if this is changed	
-CFLAGS=-O3 -lm
-
-#flags to use when running make debug	
-#replaces CFLAGS	
-DEBUGFLAGS=-g -O0 -lm -rdynamic -Wall
+ifndef D
+	CFLAGS=-O3 -lm
+	#SPLINTERPATH=../../../external/splinterdb/build/release/lib
+	SPLINTERPATH=../../../external/splinterdb/btree
+else
+	CFLAGS=-g -O0 -lm -rdynamic -Wall
+	#SPLINTERPATH=../../../external/splinterdb/build/debug/lib
+	SPLINTERPATH=../../../external/splinterdb/btree
+endif
 
 #flags to use when running gprof
 PROFFLAGS=-pg -O0 -lm
@@ -39,13 +43,13 @@ prof: test.out
 .PHONY: all clean
 
 rsqf: rsqf.c
-	$(CC) -D TEST_RSQF=1 -o rsqf.o rsqf.c murmur3.c bit_util.c set.c $(DEBUGFLAGS)
+	$(CC) -D TEST_RSQF=1 -o rsqf.o rsqf.c murmur3.c bit_util.c set.c $(CFLAGS)
 
 exaf: exaf.c
-	$(CC) -D TEST_EXAF=1 -o exaf.o exaf.c arcd.c murmur3.c bit_util.c set.c $(DEBUGFLAGS)
+	$(CC) -D TEST_EXAF=1 -o exaf.o exaf.c arcd.c murmur3.c bit_util.c set.c $(CFLAGS)
 
 utaf: utaf.c
-	$(CC) -D TEST_UTAF=1 -o utaf.o utaf.c arcd.c murmur3.c bit_util.c set.c $(DEBUGFLAGS)
+	$(CC) -D TEST_UTAF=1 -o utaf.o utaf.c arcd.c murmur3.c bit_util.c set.c $(CFLAGS)
 
 taf: taf.c
 	$(CC) -D TEST_TAF=1 -o taf.o taf.c arcd.c murmur3.c bit_util.c set.c $(CFLAGS) -lssl -lcrypto
@@ -54,10 +58,10 @@ taf_sim: taf_sim.c
 	$(CC) -D TEST_TAF_SIM=1 -o taf_sim.o taf_sim.c arcd.c murmur3.c bit_util.c set.c $(CFLAGS) -lssl -lcrypto -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux -D_GNU_SOURCE
 
 splinter_taf: splinter_taf.c
-	$(CC) -D TEST_SPLINTER_TAF=1 -o splinter_taf.o splinter_taf.c arcd.c murmur3.c bit_util.c set.c $(DEBUGFLAGS) -lssl -lcrypto -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux -D_GNU_SOURCE
+	$(CC) -D TEST_SPLINTER_TAF=1 -o splinter_taf.o splinter_taf.c arcd.c murmur3.c bit_util.c set.c -I../../../external/splinterdb/include $(CFLAGS) -lssl -lcrypto -L$(SPLINTERPATH) -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux -D_GNU_SOURCE -Wl,-rpath=$(SPLINTERPATH)
 
 arcd: arcd.c
-	$(CC) -D TEST_ARCD=1 -o arcd.o arcd.c $(DEBUGFLAGS)
+	$(CC) -D TEST_ARCD=1 -o arcd.o arcd.c $(CFLAGS)
 
 # $@ = target name
 # $^ = all prereqs

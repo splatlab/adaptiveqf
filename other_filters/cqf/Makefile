@@ -4,9 +4,13 @@ CXXTARGETS=test_ext_throughput test_adversarial
 ifdef D
 	DEBUG=-g
 	OPT=
+	#SPLINTERPATH=../../external/splinterdb/build/debug/lib
+	SPLINTERPATH=../../external/splinterdb/btree
 else
 	DEBUG=
-	OPT=-Ofast
+	OPT=-Ofast -DNDEBUG
+	#SPLINTERPATH=../../external/splinterdb/build/release/lib
+	SPLINTERPATH=../../external/splinterdb/btree
 endif
 
 ifdef NH
@@ -29,9 +33,9 @@ CXX = g++ -std=c++11
 LD= gcc -std=gnu11
 
 #CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -m64 -I. -Iinclude
-CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -lpthread -lssl -lcrypto -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux -DSKIP_BOOL_DEF -D_GNU_SOURCE -m64 -I. -Iinclude
+CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -DSPLINTERDB_PLATFORM_DIR=platform_linux -DSKIP_BOOL_DEF -D_GNU_SOURCE -m64 -I. -Iinclude -I../../external/splinterdb/include
 
-LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm -lsplinterdb
+LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm -L$(SPLINTERPATH) -lsplinterdb -Wl,-rpath=$(SPLINTERPATH)
 
 #
 # declaration of dependencies
@@ -47,7 +51,7 @@ test:								$(OBJDIR)/test.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
 
 test_micro_throughput:                                                    $(OBJDIR)/test_micro_throughput.o $(OBJDIR)/gqf.o \
                                                                                 $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
-                                                                                $(OBJDIR)/partitioned_counter.o
+                                                                                $(OBJDIR)/partitioned_counter.o 
 
 test_micro_super:                                                    $(OBJDIR)/test_micro_super.o $(OBJDIR)/gqf.o \
                                                                                 $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \

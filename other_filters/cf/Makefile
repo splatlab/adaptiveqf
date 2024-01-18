@@ -3,12 +3,19 @@ AR = ar
 PREFIX=/usr/local
 
 # Uncomment one of the following to switch between debug and opt mode
-OPT = -DNDEBUG -Ofast
-#OPT = -g -ggdb -pg
+ifdef D
+	OPT = -g -ggdb
+	#SPLINTERPATH=../../external/splinterdb/build/debug/lib
+	SPLINTERPATH=../../external/splinterdb/btree
+else
+	OPT = -DNDEBUG -Ofast
+	#SPLINTERPATH=../../external/splinterdb/build/release/lib
+	SPLINTERPATH=../../external/splinterdb/btree
+endif
+	
+CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ -I../../external/splinterdb/include -DSPLINTERDB_PLATFORM_DIR=platform_linux $(OPT)
 
-CFLAGS += --std=c++11 -fno-strict-aliasing -Wall -c -I. -I./include -I./src/ -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux $(OPT)
-
-LDFLAGS+= -Wall -lpthread -lssl -lcrypto -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux
+LDFLAGS+= -Wall -lpthread -lssl -lcrypto -L$(SPLINTERPATH) -lsplinterdb -DSPLINTERDB_PLATFORM_DIR=platform_linux -Wl,-rpath=$(SPLINTERPATH)
 
 LIBOBJECTS = \
 	./src/hashutil.o \

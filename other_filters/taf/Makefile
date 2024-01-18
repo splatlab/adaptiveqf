@@ -29,7 +29,7 @@ CC = gcc -std=gnu11
 CXX = g++ -std=c++11
 LD= gcc -std=gnu11
 
-CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -lpthread -lssl -lcrypto -lstxxl -m64 -I. -Iinclude
+CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -lpthread -lssl -lcrypto -m64 -I. -Iinclude
 
 LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm
 
