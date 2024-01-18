@@ -209,7 +209,7 @@ int main(int argc, char **argv) {
 
 	printf("initializing data structures...\n");
 	CuckooFilter<size_t, 12> filter(num_inserts);
-	return 0;
+	//return 0;
 
 	uint64_t set_len = num_inserts * 1.5f;
 	set_node *set = new set_node[set_len];

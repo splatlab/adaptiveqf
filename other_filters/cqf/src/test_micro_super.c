@@ -185,7 +185,7 @@ int main(int argc, char **argv)
 
 	uint64_t nhashbits = qbits + rbits;
 	uint64_t nslots = (1ULL << qbits);
-	double load_factor = 0.85f;
+	double load_factor = 0.9f;
 	uint64_t num_inserts = nslots * load_factor;//strtoull(argv[3], NULL, 10);
 	uint64_t num_queries = strtoull(argv[3], NULL, 10);
 
@@ -204,10 +204,21 @@ int main(int argc, char **argv)
 	printf("generating insert set of size %lu...\n", num_inserts);
 	uint64_t i;
 	uint64_t *insert_set = malloc(num_inserts * sizeof(uint64_t));
-        RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
+	RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
+
+	printf("generating query set of size %lu...\n", num_queries);
+	uint64_t *query_set = malloc(num_queries * sizeof(uint64_t));
+	RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
+	//unsigned int murmur_seed = rand();
+	for (i = 0; i < num_queries; i++) { // making the distrubution uniform from a limited universe
+		//query_set[i] = rand_zipfian(1.5f, 10000000ull, query_set[i]);
+		//query_set[i] = query_set[i] % (1ull << 24);
+		//query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
+	}
 
 	// PERFORM INSERTS
 	uint64_t target_fill = nslots * load_factor;
+	printf("performing inserts...\n");
 
 	clock_t start_clock = clock(), end_clock;
 	struct timeval timecheck;
@@ -220,33 +231,21 @@ int main(int argc, char **argv)
 	end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 	end_clock = clock();
 
-	printf("\n");
+	printf("num inserts:           %lu\n", i);
 	printf("time for inserts:      %f\n", (double)(end_time - start_time) / 1000000);
 	printf("avg insert throughput: %f ops/sec\n", (double)i * 1000000 / (end_time - start_time));
 	printf("cpu time for inserts:  %f\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
-	printf("cpu insert through:    %f ops/sec\n", (double)i * CLOCKS_PER_SEC / (end_clock - start_clock));
-
-	//backing_map.print_statistics(std::cout);
-	//backing_map.print_load_statistics(std::cout);
 
 	// PERFORM QUERIES
-	printf("generating query set of size %lu...\n", num_queries);
-	uint64_t *query_set = malloc(num_queries * sizeof(uint64_t));
-	RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
-	//unsigned int murmur_seed = rand();
-	for (i = 0; i < num_queries; i++) { // making the distrubution uniform from a limited universe
-		//query_set[i] = rand_zipfian(1.5f, 10000000ull, query_set[i]);
-		//query_set[i] = query_set[i] % (1ull << 24);
-		//query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
-	}
 
 	uint64_t fp_count = 0, value;
+	printf("performing queries...\n");
 
 	start_clock = clock();
 	gettimeofday(&timecheck, NULL);
 	start_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 	for (i = 0; i < num_queries; i++) {
-		if (qf_query(&qf, query_set[i], &value, QF_NO_LOCK | QF_KEY_IS_HASH)) {
+		if (qf_query(&qf, query_set[i], &value, QF_KEY_IS_HASH)) {
 			fp_count++;
 		}
 	}
@@ -254,11 +253,9 @@ int main(int argc, char **argv)
 	end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 	end_clock = clock();
 
-	printf("\n");
 	printf("time for queries:     %f s\n", (double)(end_time - start_time) / 1000000);
 	printf("query throughput:     %f ops/sec\n", (double)num_queries * 1000000 / (end_time - start_time));
 	printf("cpu time for queries: %f s\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
-	printf("cpu query throughput: %f ops/sec\n", (double)num_queries * CLOCKS_PER_SEC / (end_clock - start_clock));
 
 	printf("false positives:      %lu\n", fp_count);
 	printf("false positive rate:  %f%%\n", 100. * fp_count / num_queries);

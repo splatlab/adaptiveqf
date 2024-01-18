@@ -192,6 +192,10 @@ namespace cuckoofilter {
 				 char *hash_sels;
 				 HashFamily *hash_fcns;
 
+				public:
+				 uint64_t db_insert_count, db_update_count, db_query_count;
+				private:
+
 				 inline size_t GenerateIndexHash(const ItemType item) const {
 					 size_t index = hasher_(item);
 					 return index % table_->NumBuckets();
@@ -250,6 +254,7 @@ namespace cuckoofilter {
 					 table_ = new TableType<bits_per_item>(num_buckets);
 					 hash_sels = new char[num_buckets / 2];
 					 hash_fcns = new HashFamily[1 << 4];
+					 db_insert_count = db_update_count = db_query_count;
 				 }
 
 				 ~CuckooFilter() { delete table_; }
@@ -372,6 +377,7 @@ namespace cuckoofilter {
 				if (insert_index > 0) {
 					uint64_t temp = curindex + ((insert_index - 1) * table_->NumBuckets());
 					db_insert(backing_map, &temp, sizeof(temp), bm_max_key_size, buffer, &curkey, sizeof(curkey), bm_max_val_size, buffer + bm_max_key_size, 0);
+					db_insert_count++;
 
 					map_inserts++;
 					num_items_++;
@@ -385,6 +391,7 @@ namespace cuckoofilter {
 
 				slice result_val;
 				splinterdb_lookup_result_value(bm_result, &result_val);
+				db_query_count++;
 
 				map_kickouts++;
 				uint64_t nextkey;
@@ -393,6 +400,7 @@ namespace cuckoofilter {
 				splinterdb_delete(backing_map, location);
 				slice updated_slice = padded_slice(&curkey, bm_max_val_size, sizeof(curkey), buffer + bm_max_key_size, 0);
 				splinterdb_insert(backing_map, location, updated_slice);
+				db_update_count++;
 
 				/*slice test_slice = padded_slice(&location_data, bm_max_key_size, sizeof(location_data), buffer, 1);
 				splinterdb_lookup(backing_map, test_slice, bm_result);

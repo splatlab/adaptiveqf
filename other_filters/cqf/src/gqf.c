@@ -1199,9 +1199,9 @@ static inline int insert1(QF *qf, __uint128_t hash, uint8_t runtime_lock)
 			(hash_bucket_block_offset % 64);
 		
 		ret_distance = 0;
-		modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
-		modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
-		modify_metadata(&qf->runtimedata->pc_nelts, 1);
+		qf->metadata->ndistinct_elts++;
+		qf->metadata->noccupied_slots++;
+		qf->metadata->nelts++;
 	} else {
 		uint64_t runend_index              = run_end(qf, hash_bucket_index);
 		int operation = 0; /* Insert into empty bucket */
@@ -1269,7 +1269,7 @@ static inline int insert1(QF *qf, __uint128_t hash, uint8_t runtime_lock)
 				operation = 1;
 				insert_index = runstart_index;
 				new_value = hash_remainder;
-				modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+				qf->metadata->ndistinct_elts++;
 
 				/* This is the first time we're inserting this remainder, but
 					 there are larger remainders already in the run. */
@@ -1277,7 +1277,7 @@ static inline int insert1(QF *qf, __uint128_t hash, uint8_t runtime_lock)
 				operation = 2; /* Inserting */
 				insert_index = runstart_index;
 				new_value = hash_remainder;
-				modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+				qf->metadata->ndistinct_elts++;
 
 				/* Cases below here: we're incrementing the (simple or
 					 extended) counter for this remainder. */
@@ -1364,7 +1364,7 @@ static inline int insert1(QF *qf, __uint128_t hash, uint8_t runtime_lock)
 				}
 			}
 		} else {
-			modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+			qf->metadata->ndistinct_elts++;
 		}
 
 		if (operation >= 0) {
@@ -1416,9 +1416,9 @@ static inline int insert1(QF *qf, __uint128_t hash, uint8_t runtime_lock)
 					get_block(qf, i)->offset++;
 				assert(get_block(qf, i)->offset != 0);
 			}
-			modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
+			qf->metadata->noccupied_slots++;
 		}
-		modify_metadata(&qf->runtimedata->pc_nelts, 1);
+		qf->metadata->nelts++;
 		METADATA_WORD(qf, occupieds, hash_bucket_index) |= 1ULL <<
 			(hash_bucket_block_offset % 64);
 	}
@@ -1901,7 +1901,7 @@ int qf_insert(QF *qf, uint64_t key, uint64_t value, uint64_t count, uint8_t
 {
 	// We fill up the CQF up to 95% load factor.
 	// This is a very conservative check.
-	if (qf_get_num_occupied_slots(qf) >= qf->metadata->nslots * 0.95) {
+	if (qf->metadata->noccupied_slots >= qf->metadata->nslots * 0.95) {
 		if (qf->runtimedata->auto_resize) {
 			/*fprintf(stdout, "Resizing the CQF.\n");*/
 			if (qf->runtimedata->container_resize(qf, qf->metadata->nslots * 2) < 0)
@@ -2069,18 +2069,30 @@ uint64_t qf_query(const QF *qf, uint64_t key, uint64_t *value, uint8_t flags)
 	if (!is_occupied(qf, hash_bucket_index))
 		return 0;
 
-	int64_t runstart_index = hash_bucket_index == 0 ? 0 : run_end(qf,
-																																hash_bucket_index-1)
-		+ 1;
+	int64_t runstart_index = hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1;
 	if (runstart_index < hash_bucket_index)
 		runstart_index = hash_bucket_index;
 
 	/* printf("MC RUNSTART: %02lx RUNEND: %02lx\n", runstart_index, runend_index); */
 
+#ifndef NO_COUNTERS
+
+	uint64_t current_remainder;
+	do {
+		if (get_slot(qf, runstart_index) == hash_remainder) return 1;
+		/*current_remainder = get_slot(qf, runstart_index);
+		if (current_remainder >= hash_remainder) {
+			if (current_remainder == hash_remainder) return 1;
+			else return 0;
+		}*/
+	} while (!is_runend(qf, runstart_index++));
+
+#else
+
 	uint64_t current_remainder, current_count, current_end;
 	do {
-		current_end = decode_counter(qf, runstart_index, &current_remainder,
-																 &current_count);
+		current_end = decode_counter(qf, runstart_index, &current_remainder, &current_count);
+		
 		*value = current_remainder & BITMASK(qf->metadata->value_bits);
 		current_remainder = current_remainder >> qf->metadata->value_bits;
 		if (current_remainder == hash_remainder) {
@@ -2088,6 +2100,8 @@ uint64_t qf_query(const QF *qf, uint64_t key, uint64_t *value, uint8_t flags)
 		}
 		runstart_index = current_end + 1;
 	} while (!is_runend(qf, current_end));
+
+#endif
 
 	return 0;
 }

@@ -128,7 +128,7 @@ namespace cuckoofilter {
 			} else if (bits_per_tag == 32) {
 				((uint32_t *)p)[j] = tag;
 			}
-			keys[j][i] = key;
+			//keys[j][i] = key;
 		}
 
 		inline void UpdateTag(const size_t i, const size_t j, const uint64_t t) {

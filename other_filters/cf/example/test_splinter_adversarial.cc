@@ -59,42 +59,42 @@ double rand_zipfian(double s, double max, uint64_t source, uint64_t rand_max) {
 
 uint64_t MurmurHash64A(const void* key, int len, uint64_t seed) {
         const uint64_t m = 0xc6a4a7935bd1e995LLU;
-        const int r = 47;
+		const int r = 47;
 
-        uint64_t h = seed ^ (len * m);
+		uint64_t h = seed ^ (len * m);
 
-        const uint64_t* data = (const uint64_t*)key;
-        const uint64_t* end = (len >> 3) + data;
+		const uint64_t* data = (const uint64_t*)key;
+		const uint64_t* end = (len >> 3) + data;
 
-        while (data != end) {
-                uint64_t k = *data++;
+		while (data != end) {
+			uint64_t k = *data++;
 
-                k *= m;
-                k ^= k >> r;
-                k *= m;
+			k *= m;
+			k ^= k >> r;
+			k *= m;
 
-                h ^= k;
-                h *= m;
-        }
+			h ^= k;
+			h *= m;
+		}
 
-        const unsigned char * data2 = (const unsigned char*)data;
+		const unsigned char * data2 = (const unsigned char*)data;
 
-        switch (len & 7) {
-                case 7: h ^= (uint64_t)(data2[6]) << 48;
-                case 6: h ^= (uint64_t)(data2[5]) << 40;
-                case 5: h ^= (uint64_t)(data2[4]) << 32;
-                case 4: h ^= (uint64_t)(data2[3]) << 24;
-                case 3: h ^= (uint64_t)(data2[2]) << 16;
-                case 2: h ^= (uint64_t)(data2[1]) << 8;
-                case 1: h ^= (uint64_t)(data2[0]);
-                        h *= m;
-        };
+		switch (len & 7) {
+			case 7: h ^= (uint64_t)(data2[6]) << 48;
+			case 6: h ^= (uint64_t)(data2[5]) << 40;
+			case 5: h ^= (uint64_t)(data2[4]) << 32;
+			case 4: h ^= (uint64_t)(data2[3]) << 24;
+			case 3: h ^= (uint64_t)(data2[2]) << 16;
+			case 2: h ^= (uint64_t)(data2[1]) << 8;
+			case 1: h ^= (uint64_t)(data2[0]);
+					h *= m;
+		};
 
-        h ^= h >> r;
-        h *= m;
-        h ^= h >> r;
+		h ^= h >> r;
+		h *= m;
+		h ^= h >> r;
 
-        return h;
+		return h;
 }
 
 void bp() {
@@ -124,34 +124,17 @@ int db_insert(splinterdb *database, const void *key_data, const size_t key_len, 
 }
 
 int mycmp(const void *a, const void *b) {
-        return memcmp(a, b, sizeof(uint64_t));
+	return memcmp(a, b, sizeof(uint64_t));
 }
 
 int main(int argc, char **argv) {
-	uint64_t seed;
-	size_t num_queries;
-	size_t adv_freq;
-	size_t nslots;
 	if (argc < 4) {
 		printf("Usage: ./test_ext_throughput [log of nslots] [num queries] [adv freq]\n");
 		exit(1);
 	}
-	else if (argc >= 4) {
-		nslots = 1ull << atoi(argv[1]);
-		num_queries = strtoull(argv[2], NULL, 10);
-		adv_freq = strtoull(argv[3], NULL, 10);
-	}
-	if (argc >= 5) {
-		seed = strtoull(argv[4], NULL, 10);
-		printf("Warning: seeding may not necessarily work due to openssl's own generator\n");
-	}
-	else {
-		seed = time(NULL);
-	}
+	size_t nslots = 1ull << atoi(argv[1]);
+	size_t num_queries = strtoull(argv[2], NULL, 10);
 	size_t num_inserts = nslots * 0.9;
-
-	printf("running on seed %lu\n", seed);
-	srand(seed);
 
 	// Create a cuckoo filter where each item is of type size_t and
 	// use 12 bits for each item:
@@ -163,30 +146,31 @@ int main(int argc, char **argv) {
 	printf("initializing data structures...\n");
 	CuckooFilter<size_t, 12> filter(num_inserts);
 
+	remove("db");
 	data_config data_cfg;
-        default_data_config_init(MAX_KEY_SIZE, &data_cfg);
-        splinterdb_config splinterdb_cfg = (splinterdb_config){
-                .filename   = "db",
-                .cache_size = 64 * Mega,
-                .disk_size  = 20 * Giga,
-                .data_cfg   = &data_cfg,
-		.io_flags   = O_RDWR | O_CREAT | O_DIRECT
-        };
-        splinterdb *database;
-        if (splinterdb_create(&splinterdb_cfg, &database) != 0) {
-                printf("Error creating database\n");
-                exit(0);
-        }
-        splinterdb_lookup_result db_result;
-        splinterdb_lookup_result_init(database, &db_result, 0, NULL);
+	default_data_config_init(MAX_KEY_SIZE, &data_cfg);
+	splinterdb_config splinterdb_cfg = (splinterdb_config){
+		.filename   = "db",
+			.cache_size = 64 * Mega,
+			.disk_size  = 20 * Giga,
+			.data_cfg   = &data_cfg,
+			.io_flags   = O_RDWR | O_CREAT | O_DIRECT
+	};
+	splinterdb *database;
+	if (splinterdb_create(&splinterdb_cfg, &database) != 0) {
+		printf("Error creating database\n");
+		exit(0);
+	}
+	splinterdb_lookup_result db_result;
+	splinterdb_lookup_result_init(database, &db_result, 0, NULL);
 
 	printf("generating inserts...\n");
 	uint64_t *inserts = new uint64_t[num_inserts];
 	/*for (size_t i = 0; i < num_inserts; i++) {
-		inserts[i] = rand_uniform(-1);
-	}*/
+	  inserts[i] = rand_uniform(-1);
+	  }*/
 	RAND_bytes((unsigned char*)(inserts), num_inserts * sizeof(uint64_t));
-        qsort(inserts, num_inserts, sizeof(uint64_t), mycmp);
+	qsort(inserts, num_inserts, sizeof(uint64_t), mycmp);
 
 	printf("starting inserts...\n");
 
@@ -224,109 +208,114 @@ int main(int argc, char **argv) {
 	printf("\n");
 	printf("made %lu inserts\n", i);
 	printf("time for inserts:     %f sec\n", (double)(end_time - start_time) / 1000000);
-	printf("insert throughptu:    %f ops/sec\n", (double)i * 1000000 / (end_time - start_time));
+	printf("insert throughput:    %f ops/sec\n", (double)i * 1000000 / (end_time - start_time));
 	printf("cpu time for inserts: %f sec\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
-	
+
 	// Check non-existing items, a few false positives expected
 	size_t fp_queries = 0;
 
 	printf("generating queries...\n");
 	uint64_t *queries = new uint64_t[num_queries];
-	RAND_bytes((unsigned char*)queries, num_queries * sizeof(uint64_t));
 	/*for (i = 0; i < num_queries; i++) {
-		queries[i] = (uint64_t)rand_zipfian(1.5f, 10000000ull, queries[i], -1ull);
-		//queries[i] = (uint64_t)rand_zipfian(1.5f, 10000000ull, rand(), RAND_MAX);
-		queries[i] = MurmurHash64A(&queries[i], sizeof(queries[i]), murmur_seed);
+	  queries[i] = (uint64_t)rand_zipfian(1.5f, 10000000ull, queries[i], -1ull);
+	//queries[i] = (uint64_t)rand_zipfian(1.5f, 10000000ull, rand(), RAND_MAX);
+	queries[i] = MurmurHash64A(&queries[i], sizeof(queries[i]), murmur_seed);
 	}*/
 
 	printf("performing queries...\n");
+	for (int trial = 3; trial < argc; trial++) {
+		RAND_bytes((unsigned char*)queries, num_queries * sizeof(uint64_t));
+		size_t adv_freq = strtoull(argv[trial], NULL, 10);
 
-	FILE *adv_fp = fopen("stats_splinter_adversarial.csv", "w");
-	fprintf(adv_fp, "queries through fprate\n");
+		char buffer[100];
+		sprintf(buffer, "adv-%lu.csv", adv_freq);
+		FILE *adv_fp = fopen("adv-.csv", "w");
+		fprintf(adv_fp, "queries through fprate\n");
 
-	current_interval = measure_interval;
-	measure_point = num_queries * current_interval;
-	uint64_t last_point = 0;
+		current_interval = measure_interval;
+		measure_point = num_queries * current_interval;
+		uint64_t last_point = 0;
 
-	uint64_t adv_index = 0;
-	uint64_t max_adv_set_len = 1000000;
-	uint64_t *adv_set = new uint64_t[max_adv_set_len];
-	uint64_t adv_set_len = 0;
+		uint64_t adv_index = 0;
+		uint64_t max_adv_set_len = 1000000;
+		uint64_t *adv_set = new uint64_t[max_adv_set_len];
+		uint64_t adv_set_len = 0;
 
-	uint64_t adv_attempted = 0, adv_successful = 0, adv_failed = 0, adv_found = 0;
+		uint64_t adv_attempted = 0, adv_successful = 0, adv_failed = 0, adv_found = 0;
 
-	start_clock = clock();
-	gettimeofday(&timecheck, NULL);
-	uint64_t interval_time = start_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
-	for (i = 0; i < num_queries; i++) {
-		if (i % adv_freq == 0 && adv_set_len > 0) {
-			adv_attempted++;
-			if (adv_index >= adv_set_len) adv_index = 0;
-			uint64_t key = adv_set[adv_index];
-			if (filter.Contain(key) == cuckoofilter::Ok) {
-				slice query_slice = padded_slice(&key, MAX_KEY_SIZE, sizeof(key), buffer, 0);
-				splinterdb_lookup(database, query_slice, &db_result);
+		start_clock = clock();
+		gettimeofday(&timecheck, NULL);
+		uint64_t interval_time = start_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
+		for (i = 0; i < num_queries; i++) {
+			if (i % adv_freq == 0 && adv_set_len > 0) {
+				adv_attempted++;
+				if (adv_index >= adv_set_len) adv_index = 0;
+				uint64_t key = adv_set[adv_index];
+				if (filter.Contain(key) == cuckoofilter::Ok) {
+					slice query_slice = padded_slice(&key, MAX_KEY_SIZE, sizeof(key), buffer, 0);
+					splinterdb_lookup(database, query_slice, &db_result);
 
-				if (!splinterdb_lookup_found(&db_result)) {
-					fp_queries++;
-					adv_successful++;
+					if (!splinterdb_lookup_found(&db_result)) {
+						fp_queries++;
+						adv_successful++;
+					}
+					else {
+						adv_set[adv_index] = adv_set[--adv_set_len];
+						adv_failed++;
+					}
 				}
 				else {
 					adv_set[adv_index] = adv_set[--adv_set_len];
 					adv_failed++;
 				}
+				adv_index++;
 			}
 			else {
-				adv_set[adv_index] = adv_set[--adv_set_len];
-				adv_failed++;
-			}
-			adv_index++;
-		}
-		else {
-			if (filter.Contain(queries[i]) == cuckoofilter::Ok) {
-				slice query_slice = padded_slice(&queries[i], MAX_KEY_SIZE, sizeof(queries[i]), buffer, 0);
-				splinterdb_lookup(database, query_slice, &db_result);
+				if (filter.Contain(queries[i]) == cuckoofilter::Ok) {
+					slice query_slice = padded_slice(&queries[i], MAX_KEY_SIZE, sizeof(queries[i]), buffer, 0);
+					splinterdb_lookup(database, query_slice, &db_result);
 
-				if (!splinterdb_lookup_found(&db_result)) {
-					fp_queries++;
-					if (adv_set_len < max_adv_set_len) {
-						adv_set[adv_set_len++] = queries[i];
-						adv_found++;
+					if (!splinterdb_lookup_found(&db_result)) {
+						fp_queries++;
+						if (adv_set_len < max_adv_set_len) {
+							adv_set[adv_set_len++] = queries[i];
+							adv_found++;
+						}
 					}
 				}
 			}
+
+			if (i >= measure_point) {
+				gettimeofday(&timecheck, NULL);
+				fprintf(adv_fp, "%lu %f %f\n", i, (double)(i - last_point) * 1000000 / (timecheck.tv_sec * 1000000 + timecheck.tv_usec - interval_time), (double)fp_queries / i);
+				fprintf(stderr, "\r%d%%", (int)(current_interval * 100));
+
+				current_interval += measure_interval;
+				measure_point = num_queries * current_interval;
+				last_point = i;
+
+				gettimeofday(&timecheck, NULL);
+				interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
+			}
 		}
+		gettimeofday(&timecheck, NULL);
+		end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
+		end_clock = clock();
 
-		if (i >= measure_point) {
-			gettimeofday(&timecheck, NULL);
-			fprintf(adv_fp, "%lu %f %f\n", i, (double)(i - last_point) * 1000000 / (timecheck.tv_sec * 1000000 + timecheck.tv_usec - interval_time), (double)fp_queries / i);
-			fprintf(stderr, "\r%d%%", (int)(current_interval * 100));
+		printf("\n");
+		printf("made %lu queries\n", num_queries);
+		printf("time for queries:     %f sec\n", (double)(end_time - start_time) / 1000000);
+		printf("query throughput:     %f ops/sec\n", (double)num_queries * 1000000 / (end_time - start_time));
+		printf("cpu time for queries: %f sec\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
 
-			current_interval += measure_interval;
-			measure_point = num_queries * current_interval;
-			last_point = i;
+		printf("adv attempted:        %lu\n", adv_attempted);
+		printf("adv successful:       %lu\n", adv_successful);
+		printf("adv failed:           %lu\n", adv_failed);
+		printf("adv found:            %lu\n", adv_found);
 
-			gettimeofday(&timecheck, NULL);
-			interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
-		}
+		printf("false positives:      %lu\n", fp_queries);
+		printf("false positive rate:  %f%%\n", 100. * fp_queries / num_queries);
 	}
-	gettimeofday(&timecheck, NULL);
-	end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
-	end_clock = clock();
-
-	printf("\n");
-	printf("made %lu queries\n", num_queries);
-	printf("time for queries:     %f sec\n", (double)(end_time - start_time) / 1000000);
-	printf("query throughput:     %f ops/sec\n", (double)num_queries * 1000000 / (end_time - start_time));
-	printf("cpu time for queries: %f sec\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
-
-	printf("adv attempted:        %lu\n", adv_attempted);
-	printf("adv successful:       %lu\n", adv_successful);
-	printf("adv failed:           %lu\n", adv_failed);
-	printf("adv found:            %lu\n", adv_found);
-
-	printf("false positives:      %lu\n", fp_queries);
-	printf("false positive rate:  %f%%\n", 100. * fp_queries / num_queries);
 
 	return 0;
 }

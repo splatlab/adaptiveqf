@@ -216,19 +216,19 @@ int main(int argc, char **argv)
 	splinterdb_lookup_result_init(backing_map, &bm_result, 0, NULL);*/
 
 	data_config data_cfg;
-        default_data_config_init(MAX_KEY_SIZE, &data_cfg);
-        splinterdb_config splinterdb_cfg = (splinterdb_config){
-                .filename   = "db",
-                .cache_size = 64 * Mega,
-                .disk_size  = 20 * Giga,
-                .data_cfg   = &data_cfg,
-		.io_flags   = O_RDWR | O_CREAT | O_DIRECT
-        };
-        splinterdb *database;
-        if (splinterdb_create(&splinterdb_cfg, &database) != 0) {
-                printf("Error creating database\n");
-                exit(0);
-        }
+	default_data_config_init(MAX_KEY_SIZE, &data_cfg);
+	splinterdb_config splinterdb_cfg = (splinterdb_config){
+		.filename   = "db",
+			.cache_size = 64 * Mega,
+			.disk_size  = 20 * Giga,
+			.data_cfg   = &data_cfg,
+			.io_flags   = O_RDWR | O_CREAT | O_DIRECT
+	};
+	splinterdb *database;
+	if (splinterdb_create(&splinterdb_cfg, &database) != 0) {
+		printf("Error creating database\n");
+		exit(0);
+	}
 	splinterdb_lookup_result_init(database, &db_result, 0, NULL);
 
 	printf("initializing filter...\n");
@@ -269,9 +269,9 @@ int main(int argc, char **argv)
 		if (qf.metadata->noccupied_slots >= measure_point) {
 			fprintf(stderr, "\rperforming insertions... %f%%          ", current_interval * 100);
 
-                        current_interval += measure_interval;
-                        measure_point = nslots * current_interval;
-                }
+			current_interval += measure_interval;
+			measure_point = nslots * current_interval;
+		}
 	}
 	end_clock = clock();
 	gettimeofday(&timecheck, NULL);
@@ -320,7 +320,7 @@ int main(int argc, char **argv)
 			if (adv_index >= adv_set_len) adv_index = 0;
 			uint64_t key = adv_set[adv_index];
 			if (qf_query(&qf, key, &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH)) {
-				uint64_t temp = ret_hash | (1ull << ret_hash_len);
+				uint64_t temp = ret_hash & BITMASK(ret_hash_len);
 				slice query = padded_slice(&temp, MAX_KEY_SIZE, sizeof(temp), buffer, 0);
 				splinterdb_lookup(database, query, &db_result);
 				slice result_val;
@@ -335,7 +335,7 @@ int main(int argc, char **argv)
 						ret_hash_len = qf_adapt(&qf, ret_index, orig_key, key, &ret_hash, QF_KEY_IS_HASH | QF_NO_LOCK);
 						if (ret_hash_len > 0) {
 							splinterdb_delete(database, result_val);
-							uint64_t temp = ret_hash | (1ull << ret_hash_len);
+							uint64_t temp = ret_hash & BITMASK(ret_hash_len);
 							db_insert(database, &temp, sizeof(temp), &orig_key, sizeof(orig_key), 0);
 						}
 						else if (ret_hash_len == QF_NO_SPACE) {
@@ -362,7 +362,7 @@ int main(int argc, char **argv)
 		}
 		else {
 			if (qf_query(&qf, query_set[i], &ret_index, &ret_hash, &ret_hash_len, QF_KEY_IS_HASH)) {
-				uint64_t temp = ret_hash | (1ull << ret_hash_len);
+				uint64_t temp = ret_hash & BITMASK(ret_hash_len);
 				slice query = padded_slice(&temp, MAX_KEY_SIZE, sizeof(temp), buffer, 0);
 				splinterdb_lookup(database, query, &db_result);
 				slice result_val;

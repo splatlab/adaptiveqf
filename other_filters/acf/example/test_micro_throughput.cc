@@ -125,6 +125,7 @@ int main(int argc, char **argv) {
 	//   CuckooFilter<size_t, 13, cuckoofilter::PackedTable> filter(total_items);
 	printf("initializing data structures...\n");
 	CuckooFilter<size_t, 12> filter(num_inserts);
+	return 0;
 
 	uint64_t set_len = num_inserts * 1.5f;
 	set_node *set = new set_node[set_len];
@@ -138,11 +139,6 @@ int main(int argc, char **argv) {
 
 	printf("starting inserts...\n");
 
-	// Insert items to this cuckoo filter
-	double measure_interval = 0.01f;
-	double current_interval = measure_interval;
-	uint64_t measure_point = nslots * current_interval;
-
 	clock_t start_clock = clock(), end_clock;
 	struct timeval timecheck;
 	gettimeofday(&timecheck, NULL);
@@ -153,12 +149,6 @@ int main(int argc, char **argv) {
 		if (filter.AddUsingSet(inserts[i], set, set_len) != cuckoofilter::Ok) {
 			printf("insert failed at fill rate %f\n", (double)i / nslots);
 			break;
-		}
-
-		if (i >= measure_point) {
-			fprintf(stderr, "\r%d%%", (int)(100 * current_interval));
-			current_interval += measure_interval;
-			measure_point = nslots * current_interval;
 		}
 	}
 	gettimeofday(&timecheck, NULL);
@@ -177,6 +167,7 @@ int main(int argc, char **argv) {
 	printf("generating queries...\n");
 	uint64_t *queries = new uint64_t[num_queries];
 	RAND_bytes((unsigned char*)queries, num_queries * sizeof(uint64_t));
+
 	unsigned int murmur_seed = rand();
 	for (i = 0; i < num_queries; i++) {
 		queries[i] = (uint64_t)rand_zipfian(1.5f, 10000000ull, queries[i], -1ull);
@@ -185,29 +176,17 @@ int main(int argc, char **argv) {
 	}
 
 	printf("performing queries...\n");
-	current_interval = measure_interval;
-	measure_point = num_queries * current_interval;
+	uint64_t bitmask = (1ull << (atoi(argv[1]) + 12)) - 1; 
 
 	start_clock = clock();
 	gettimeofday(&timecheck, NULL);
 	start_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 	for (i = 0; i < num_queries; i++) {
-		uint64_t location_data, orig_key;
+		uint64_t location_data;
 		if (filter.ContainReturn(queries[i], &location_data) == cuckoofilter::Ok) {
-			set_query(set, set_len, location_data, &orig_key);
+			fp_queries++;
 
-			if (queries[i] != orig_key) {
-				fp_queries++;
-
-				if (filter.AdaptUsingSet(orig_key, set, set_len) != cuckoofilter::Ok) printf("error: adapt failed to find previously queried item\n");
-			}
-		}
-
-		if (i >= measure_point) {
-			fprintf(stderr, "\r%d%%", (int)(current_interval * 100));
-
-			current_interval += measure_interval;
-			measure_point = num_queries * current_interval;
+			filter.AdaptUsingSet(queries[i] & bitmask, set, set_len);
 		}
 	}
 	gettimeofday(&timecheck, NULL);

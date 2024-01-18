@@ -13,72 +13,72 @@
 using cuckoofilter::CuckooFilter;
 
 uint64_t rand_uniform(uint64_t max) {
-        if (max <= RAND_MAX) return rand() % max;
-        uint64_t a = rand();
-        uint64_t b = rand();
-        a |= (b << 31);
-        return a % max;
+	if (max <= RAND_MAX) return rand() % max;
+	uint64_t a = rand();
+	uint64_t b = rand();
+	a |= (b << 31);
+	return a % max;
 }
 
-double rand_zipfian(double s, double max, uint64_t source, uint64_t rand_max) {
-        double p = (double)source / rand_max;
+double rand_zipfian(double s, double max, uint64_t source) {
+	double p = (double)source / (-1ULL);
 
-        double pD = p * (12 * (pow(max, -s + 1) - 1) / (1 - s) + 6 + 6 * pow(max, -s) + s - s * pow(max, -s + 1));
-        double x = max / 2;
-        while (true) {
-                double m = pow(x, -s - 2);
-                double mx = m * x;
-                double mxx = mx * x;
-                double mxxx = mxx * x;
+	double pD = p * (12 * (pow(max, -s + 1) - 1) / (1 - s) + 6 + 6 * pow(max, -s) + s - s * pow(max, -s + 1));
+	double x = max / 2;
+	while (true) {
+		double m = pow(x, -s - 2);
+		double mx = m * x;
+		double mxx = mx * x;
+		double mxxx = mxx * x;
 
-                double b = 12 * (mxxx - 1) / (1 - s) + 6 + 6 * mxx + s - (s * mx) - pD;
-                double c = 12 * mxx - (6 * s * mx) + (m * s * (s + 1));
-                double newx = x - b / c > 1 ? x - b / c : 1;
-                if (abs(newx - x) <= 0.01) { // this is the tolerance for approximation
-                        return newx;
-                }
-                x = newx;
-        }
+		double b = 12 * (mxxx - 1) / (1 - s) + 6 + 6 * mxx + s - (s * mx) - pD;
+		double c = 12 * mxx - (6 * s * mx) + (m * s * (s + 1));
+		double newx = x - b / c > 1 ? x - b / c : 1;
+		if (abs(newx - x) <= 0.01) { // this is the tolerance for approximation
+			return newx;
+		}
+		x = newx;
+	}
 }
 
 uint64_t MurmurHash64A(const void* key, int len, uint64_t seed) {
-        const uint64_t m = 0xc6a4a7935bd1e995LLU;
-        const int r = 47;
+	const uint64_t m = 0xc6a4a7935bd1e995LLU;
+	const int r = 47;
 
-        uint64_t h = seed ^ (len * m);
+	uint64_t h = seed ^ (len * m);
 
-        const uint64_t* data = (const uint64_t*)key;
-        const uint64_t* end = (len >> 3) + data;
+	const uint64_t* data = (const uint64_t*)key;
+	const uint64_t* end = (len >> 3) + data;
 
-        while (data != end) {
-                uint64_t k = *data++;
+	while (data != end) {
+		uint64_t k = *data++;
 
-                k *= m;
-                k ^= k >> r;
-                k *= m;
+		k *= m;
+		k ^= k >> r;
+		k *= m;
 
-                h ^= k;
-                h *= m;
-        }
+		h ^= k;
+		h *= m;
+	}
 
-        const unsigned char * data2 = (const unsigned char*)data;
+	const unsigned char * data2 = (const unsigned char*)data;
 
-        switch (len & 7) {
-                case 7: h ^= (uint64_t)(data2[6]) << 48;
-                case 6: h ^= (uint64_t)(data2[5]) << 40;
-                case 5: h ^= (uint64_t)(data2[4]) << 32;
-                case 4: h ^= (uint64_t)(data2[3]) << 24;
-                case 3: h ^= (uint64_t)(data2[2]) << 16;
-                case 2: h ^= (uint64_t)(data2[1]) << 8;
-                case 1: h ^= (uint64_t)(data2[0]);
-                        h *= m;
-        };
+	switch (len & 7) {
+		case 7: h ^= (uint64_t)(data2[6]) << 48;
+		case 6: h ^= (uint64_t)(data2[5]) << 40;
+		case 5: h ^= (uint64_t)(data2[4]) << 32;
+		case 4: h ^= (uint64_t)(data2[3]) << 24;
+		case 3: h ^= (uint64_t)(data2[2]) << 16;
+		case 2: h ^= (uint64_t)(data2[1]) << 8;
+		case 1: h ^= (uint64_t)(data2[0]);
+				h *= m;
+	};
 
-        h ^= h >> r;
-        h *= m;
-        h ^= h >> r;
+	h ^= h >> r;
+	h *= m;
+	h ^= h >> r;
 
-        return h;
+	return h;
 }
 
 void bp() {
@@ -148,7 +148,7 @@ int main(int argc, char **argv) {
 	RAND_bytes((unsigned char*)queries, num_queries * sizeof(uint64_t));
 	unsigned int murmur_seed = rand();
 	for (i = 0; i < num_queries; i++) {
-		queries[i] = rand_zipfian(1.5f, 10000000ull, queries[i], -1);
+		queries[i] = rand_zipfian(1.5f, 10000000ull, queries[i]);
 		//queries[i] = queries[i] % (1ull << 24);
 		queries[i] = MurmurHash64A(&queries[i], sizeof(queries[i]), murmur_seed);
 	}

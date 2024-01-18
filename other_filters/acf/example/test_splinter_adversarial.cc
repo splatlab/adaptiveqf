@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
 		num_queries = strtoull(argv[2], NULL, 10);
 	}
 	seed = time(NULL);
-	size_t num_inserts = nslots * 0.85;
+	size_t num_inserts = nslots * 0.9;
 
 	printf("running on seed %lu\n", seed);
 	srand(seed);
@@ -143,15 +143,19 @@ int main(int argc, char **argv) {
 
 	unsigned char buffer[MAX_KEY_SIZE + MAX_VAL_SIZE];
 
+	FILE *inserts_fp = fopen("stats_adv_inserts.csv", "w");
+	fprintf(inserts_fp, "fill through\n");
+
+
 	// Insert items to this cuckoo filter
 	double measure_interval = 0.01f;
 	double current_interval = measure_interval;
-	uint64_t measure_point = nslots * current_interval;
+	uint64_t measure_point = nslots * current_interval, last_point = 0;
 
 	clock_t start_clock = clock(), end_clock;
 	struct timeval timecheck;
 	gettimeofday(&timecheck, NULL);
-	uint64_t start_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec, end_time;
+	uint64_t start_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec, end_time, interval_time = start_time;
 
 	size_t i;
 	for (i = 0; i <= num_inserts; i++) {
@@ -161,9 +165,16 @@ int main(int argc, char **argv) {
 		}
 
 		if (i >= measure_point) {
+			gettimeofday(&timecheck, NULL);
+			fprintf(inserts_fp, "%f %f\n", current_interval * 100, (double)(i - last_point) * 1000000 / (timecheck.tv_sec * 1000000 + timecheck.tv_usec - interval_time));
+
 			fprintf(stderr, "\r%d%%", (int)(100 * current_interval));
 			current_interval += measure_interval;
+			last_point = measure_point;
 			measure_point = nslots * current_interval;
+
+			gettimeofday(&timecheck, NULL);
+			interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 		}
 	}
 	gettimeofday(&timecheck, NULL);

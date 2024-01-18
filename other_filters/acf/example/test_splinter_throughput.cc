@@ -140,9 +140,9 @@ int main(int argc, char **argv) {
 
 	printf("generating inserts...\n");
 	uint64_t *inserts = new uint64_t[num_inserts];
-	/*for (size_t i = 0; i < num_inserts; i++) {
+	for (size_t i = 0; i < num_inserts; i++) {
 		inserts[i] = rand_uniform(-1);
-	}*/
+	}
 	RAND_bytes((unsigned char*)(inserts), num_inserts * sizeof(uint64_t));
 
 	printf("starting inserts...\n");
@@ -210,6 +210,10 @@ int main(int argc, char **argv) {
 	printf("time for inserts:     %f sec\n", (double)(end_time - start_time) / 1000000);
 	printf("insert throughput:    %f ops/sec\n", (double)i * 1000000 / (end_time - start_time));
 	printf("cpu time for inserts: %f sec\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
+
+	printf("database inserts:     %lu\n", filter.db_insert_count);
+	printf("database updates:     %lu\n", filter.db_update_count);
+	printf("database queries:     %lu\n", filter.db_query_count);
 	
 	/*uint64_t *query_set = (uint64_t*)calloc(total_items, sizeof(uint64_t));
 	for (size_t i = 0; i < total_items; i++) {
@@ -232,8 +236,8 @@ int main(int argc, char **argv) {
 	RAND_bytes((unsigned char*)queries, num_queries * sizeof(uint64_t));
 	for (i = 0; i < num_queries; i++) {
 		//queries[i] = (uint64_t)rand_zipfian(1.5f, 10000000ull, queries[i], -1ull);
-		queries[i] = queries[i] % (1ull << 24);
-		queries[i] = MurmurHash64A(&queries[i], sizeof(queries[i]), murmur_seed);
+		//queries[i] = queries[i] % (1ull << 24);
+		//queries[i] = MurmurHash64A(&queries[i], sizeof(queries[i]), murmur_seed);
 	}
 
 	printf("performing queries...\n");

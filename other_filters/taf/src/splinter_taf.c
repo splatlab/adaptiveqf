@@ -33,6 +33,8 @@
 #define MAX_KEY_SIZE 16
 #define MAX_VAL_SIZE 16
 
+uint64_t db_insert_count = 0, db_update_count = 0, db_query_count = 0;
+
 struct backing_data {
 	uint64_t elt;
 	uint64_t hash;
@@ -63,6 +65,7 @@ void db_insert(TAF *filter, const uint64_t loc, const uint64_t key, const uint64
 	slice val_slice = slice_create(MAX_VAL_SIZE, val_padded);
 
 	splinterdb_insert(filter->database, key_slice, val_slice);
+	db_insert_count++;
 }
 
 void db_update(TAF *filter, const uint64_t loc, const uint64_t key, const uint64_t hash) {
@@ -79,12 +82,14 @@ void db_update(TAF *filter, const uint64_t loc, const uint64_t key, const uint64
 	slice val_slice = slice_create(MAX_VAL_SIZE, val_padded);
 
 	splinterdb_insert(filter->database, loc_slice, val_slice);
+	db_update_count++;
 }
 
 backing_data db_query(TAF *filter, const uint64_t loc) {
 	char buffer[MAX_KEY_SIZE];
 	slice loc_slice = padded_slice(&loc, MAX_KEY_SIZE, sizeof(loc), buffer);
 	splinterdb_lookup(filter->database, loc_slice, &filter->db_result);
+	db_query_count++;
 
 	backing_data data;
 	if (!splinterdb_lookup_found(&filter->db_result)) {
@@ -1536,7 +1541,7 @@ void test_splinter_veracity() {
 void test_splinter_throughput(int qbits, uint64_t num_queries, uint64_t num_inc_queries) {
 	printf("Testing %s...\n", __FUNCTION__);
 	size_t num_slots = 1ull << qbits;
-	double load = 0.8;
+	double load = 0.9;
 
 	//size_t xnum_slots = num_slots + (10 * sqrt(num_slots));
 
@@ -1567,7 +1572,7 @@ void test_splinter_throughput(int qbits, uint64_t num_queries, uint64_t num_inc_
 		if (i >= measure_point) {
 			gettimeofday(&timecheck, NULL);
 			inserts_fp = fopen("stats_splinter_inserts.csv", "a");
-			fprintf(inserts_fp, "%f %f\n", (double)i / num_slots, (double)num_slots / num_segments * 1000000 / (timecheck.tv_sec * 1000000 + timecheck.tv_usec - interval_time));
+			fprintf(inserts_fp, "%f %f\n", 100. * i / num_slots, (double)num_slots / num_segments * 1000000 / (timecheck.tv_sec * 1000000 + timecheck.tv_usec - interval_time));
 			fclose(inserts_fp);
 			fprintf(stderr, "\rload factor: %d%%", (int)((i + 1) * 100 / num_slots));
 
@@ -1588,13 +1593,18 @@ void test_splinter_throughput(int qbits, uint64_t num_queries, uint64_t num_inc_
 	printf("insert throughput:    %f ops/sec\n", (double)num_inserts * 1000000 / (end_time - start_time));
 	printf("cpu time for inserts: %f sec\n", (double)(end_clock - start_clock) / CLOCKS_PER_SEC);
 
+	printf("database inserts:     %lu\n", db_insert_count);
+	printf("database updates:     %lu\n", db_update_count);
+	printf("database queries:     %lu\n", db_query_count);
+
 	printf("Generating queries\n");
 	uint64_t *query_set = malloc(num_queries * sizeof(uint64_t));
 	RAND_bytes((void*)query_set, num_queries * sizeof(uint64_t));
-	int murmur_seed = rand();
+	//int murmur_seed = rand();
 	for (uint64_t i = 0; i < num_queries; i++) {
-		query_set[i] = query_set[i] % (1ull << 24);
-		query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
+		//query_set[i] %= (1ull << 24);
+		//query_set[i] = query_set[i] % (1ull << 24);
+		//query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
 	}
 
 	printf("Performing queries\n");
@@ -1634,7 +1644,7 @@ void test_splinter_throughput(int qbits, uint64_t num_queries, uint64_t num_inc_
 			fclose(queries_fp);
 			
 			fprates_fp = fopen("stats_splinter_fprates.csv", "a");
-			fprintf(fprates_fp, "%lu %f\n", i, (double)fp_count / i);
+			fprintf(fprates_fp, "%lu %f\n", i, 100. * fp_count / i);
 			fclose(fprates_fp);
 
 			fprintf(stderr, "\rqueries done: %d%%", (int)((i + 1) * 100 / num_queries));
@@ -1670,7 +1680,7 @@ void test_splinter_throughput(int qbits, uint64_t num_queries, uint64_t num_inc_
 void test_splinter_adversarial(int qbits, uint64_t num_queries, char **argv, int argc) {
 	printf("Testing %s...\n", __FUNCTION__);
 	size_t num_slots = 1ull << qbits;
-	double load = 0.8;
+	double load = 0.9;
 
 	//size_t xnum_slots = num_slots + (10 * sqrt(num_slots));
 
@@ -1682,6 +1692,10 @@ void test_splinter_adversarial(int qbits, uint64_t num_queries, char **argv, int
 	RAND_bytes((void*)insert_set, num_inserts * sizeof(uint64_t));
 
 	printf("Performing inserts\n");
+	FILE *inserts_fp = fopen("stats_splinter_adv_inserts.csv", "w");
+	fprintf(inserts_fp, "fill through\n");
+	fclose(inserts_fp);
+
 	uint64_t num_segments = 100;
 	uint64_t measure_point = num_slots / num_segments - 1;
 	uint64_t cur_segment = 0;
@@ -1695,10 +1709,17 @@ void test_splinter_adversarial(int qbits, uint64_t num_queries, char **argv, int
 		taf_insert(filter, insert_set[i]);
 
 		if (i >= measure_point) {
+			gettimeofday(&timecheck, NULL);
+			inserts_fp = fopen("stats_splinter_adv_inserts.csv", "a");
+			fprintf(inserts_fp, "%f %f\n", 100. * i / num_slots, (double)num_slots / num_segments * 1000000 / (timecheck.tv_sec * 1000000 + timecheck.tv_usec - interval_time));
+			fclose(inserts_fp);
 			fprintf(stderr, "\rload factor: %d%%", (int)((i + 1) * 100 / num_slots));
 
 			cur_segment++;
 			measure_point = (cur_segment + 1) * num_slots / num_segments - 1;
+			
+			gettimeofday(&timecheck, NULL);
+			interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 		}
 	}
 

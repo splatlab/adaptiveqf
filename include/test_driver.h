@@ -27,6 +27,22 @@
 #include <splinterdb/splinterdb.h>
 
 
-int run_throughput_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, int verbose, char *inserts_outfile, char *queries_outfile);
+struct _test_results_t {
+	int exit_code;
+	double insert_throughput;
+	double query_throughput;
+	double final_query_throughput;
+	double false_positive_rate;
+} typedef test_results_t;
+
+void warm_up_filter(const QF *qf, uint64_t num_warmup_queries);
+
+test_results_t run_throughput_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, int verbose, char *inserts_outfile, char *queries_outfile);
+
+test_results_t run_split_throughput_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, int verbose, char *inserts_outfile, char *queries_outfile);
+
+test_results_t run_adversarial_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, uint64_t adv_freq, uint64_t adv_set_max_size, int verbose, char *queries_outfile);
+
+test_results_t run_micro_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, int verbose);
 
 #endif

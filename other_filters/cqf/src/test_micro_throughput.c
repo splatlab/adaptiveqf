@@ -202,14 +202,14 @@ int main(int argc, char **argv)
 	printf("generating insert set of size %lu...\n", num_inserts);
 	uint64_t i;
 	uint64_t *insert_set = malloc(num_inserts * sizeof(uint64_t));
-        RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
+	RAND_bytes((unsigned char*)insert_set, num_inserts * sizeof(uint64_t));
 
 	// PERFORM INSERTS
 	uint64_t target_fill = nslots * load_factor;
 
 	double measure_interval = 0.01f;
-        double current_interval = measure_interval;
-        uint64_t measure_point = target_fill * current_interval;
+	double current_interval = measure_interval;
+	uint64_t measure_point = target_fill * current_interval;
 
 	clock_t start_clock = clock(), end_clock;
 	struct timeval timecheck;
@@ -222,9 +222,9 @@ int main(int argc, char **argv)
 		if (qf.metadata->noccupied_slots >= measure_point) {
 			fprintf(stderr, "\rperforming insertions... %f%%          ", current_interval * 100);
 
-                        current_interval += measure_interval;
-                        measure_point = nslots * current_interval;
-                }
+			current_interval += measure_interval;
+			measure_point = nslots * current_interval;
+		}
 	}
 	gettimeofday(&timecheck, NULL);
 	end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
@@ -263,15 +263,15 @@ int main(int argc, char **argv)
 			fp_count++;
 			/*if (!set_query(set, set_len, query_set[i], &value)) {
 				fp_count++;
-			}*/
+				}*/
 		}
 
 		if (i >= measure_point) {
 			fprintf(stderr, "\rperforming queries... %f%%           ", current_interval * 100);
 
-                        current_interval += measure_interval;
-                        measure_point = num_queries * current_interval;
-                }
+			current_interval += measure_interval;
+			measure_point = num_queries * current_interval;
+		}
 	}
 	gettimeofday(&timecheck, NULL);
 	end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;

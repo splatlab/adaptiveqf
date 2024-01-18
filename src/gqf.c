@@ -1284,12 +1284,12 @@ static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_in
 	return 1;
 }
 
-static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, uint8_t runtime_lock) // copy of the insert function for modification
+static inline int insert_using_ll_table(QF *qf, qf_insert_result *result, uint64_t count, uint8_t runtime_lock) // copy of the insert function for modification
 // hash is 64 hashed key bits concatenated with 64 value bits
 {
 	/* int ret_distance = 0; */
-	uint64_t hash_remainder = hash & BITMASK(qf->metadata->bits_per_slot);
-	uint64_t hash_bucket_index = (hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) >> qf->metadata->bits_per_slot;
+	uint64_t hash_remainder = result->hash & BITMASK(qf->metadata->bits_per_slot);
+	uint64_t hash_bucket_index = (result->hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) >> qf->metadata->bits_per_slot;
 	uint64_t hash_bucket_block_offset = hash_bucket_index % QF_SLOTS_PER_BLOCK;
 	/*uint64_t hash_bucket_lock_offset  = hash_bucket_index % NUM_SLOTS_TO_LOCK;*/
 
@@ -1298,7 +1298,7 @@ static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, u
 	//printf("remainder = %lu   \t index = %lu\n", hash_remainder, hash_bucket_index);
 
 	if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
-		if (!qf_lock(qf, hash_bucket_index, /*small*/ false, runtime_lock))
+		if (!qf_lock(qf, hash_bucket_index, false, runtime_lock))
 			return QF_COULDNT_LOCK;
 	}
 
@@ -1319,7 +1319,7 @@ static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, u
 		qf->metadata->nelts++;
 
 		if (count > 1) {
-			insert_and_extend(qf, hash_bucket_index, hash, count - 1, hash, hash, hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
+			insert_and_extend(qf, hash_bucket_index, result->hash, count - 1, result->hash, result->hash, result->hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
 		}
 		//printf("inserted in slot %lu - empty slot\n", hash_bucket_index);
 	} else { /* Non-empty slot */
@@ -1337,7 +1337,7 @@ static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, u
 			qf->metadata->noccupied_slots++;
 			qf->metadata->nelts++;
 
-			if (count > 1) insert_and_extend(qf, hash_bucket_index, hash, count - 1, hash, hash, hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash is a placeholders
+			if (count > 1) insert_and_extend(qf, hash_bucket_index, result->hash, count - 1, result->hash, result->hash, result->hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash is a placeholders
 		} else { /* Non-empty bucket */
 
 			/* uint64_t current_remainder, current_count, current_end; */
@@ -1354,7 +1354,7 @@ static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, u
 			do {
 				current_remainder = get_slot(qf, current_index);
 				if (current_remainder >= hash_remainder) {
-					if (current_remainder == hash_remainder) ret_code = 1;
+					if (current_remainder == hash_remainder) result->minirun_existed = 1;
 					insert_index = current_index;
 					break;
 				}
@@ -1387,7 +1387,7 @@ static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, u
 			qf->metadata->noccupied_slots++;
 			qf->metadata->nelts++;
 
-			if (count > 1) insert_and_extend(qf, insert_index, hash, count - 1, hash, hash, hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
+			if (count > 1) insert_and_extend(qf, insert_index, result->hash, count - 1, result->hash, result->hash, result->hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
 		}
 	}
 
@@ -1395,10 +1395,10 @@ static inline int insert_using_ll_table(QF *qf, uint64_t hash, uint64_t count, u
 		qf_unlock(qf, hash_bucket_index, /*small*/ false);
 	}
 
-	return ret_code;
+	return 0;
 }
 
-int qf_insert_using_ll_table(QF *qf, uint64_t key, uint64_t count, uint64_t *ret_hash, uint8_t flags)
+int qf_insert_using_ll_table(QF *qf, uint64_t key, uint64_t count, qf_insert_result *result, uint8_t flags)
 {
 	// We fill up the CQF up to 95% load factor.
 	// This is a very conservative check.
@@ -1418,35 +1418,40 @@ int qf_insert_using_ll_table(QF *qf, uint64_t key, uint64_t count, uint64_t *ret
 	if (count == 0)
 		return 0;
 
+	result->hash = key;
 	if (GET_KEY_HASH(flags) != QF_KEY_IS_HASH) {
 		if (qf->metadata->hash_mode == QF_HASH_DEFAULT)
-			key = MurmurHash64A(((void *)&key), sizeof(key), qf->metadata->seed);
+			result->hash = MurmurHash64A(((void *)&key), sizeof(key), qf->metadata->seed);
 		else if (qf->metadata->hash_mode == QF_HASH_INVERTIBLE)
-			key = hash_64(key, -1ULL);
+			result->hash = hash_64(key, -1ULL);
 	}
 	//uint64_t hash = ((key << qf->metadata->value_bits) | (value & BITMASK(qf->metadata->value_bits)));// % qf->metadata->range;
-	uint64_t hash = key;
 	
-	*ret_hash = hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
-	return insert_using_ll_table(qf, hash, count, flags);
+	result->minirun_existed = 0;
+	result->minirun_id = result->hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
+	return insert_using_ll_table(qf, result, count, flags);
 }
 
-int qf_query_using_ll_table(const QF *qf, uint64_t key, qf_query_result *query_result, uint8_t flags) {
+int qf_query_using_ll_table(const QF *qf, uint64_t key, uint64_t *ret_hash, uint8_t flags) {
 	// Convert key to hash
 	if (GET_KEY_HASH(flags) != QF_KEY_IS_HASH) {
 		if (qf->metadata->hash_mode == QF_HASH_DEFAULT)
-			key = MurmurHash64A(((void *)&key), sizeof(key), qf->metadata->seed);
+			*ret_hash = MurmurHash64A(((void *)&key), sizeof(key), qf->metadata->seed);
 		else if (qf->metadata->hash_mode == QF_HASH_INVERTIBLE)
-			key = hash_64(key, -1ULL);
+			*ret_hash = hash_64(key, -1ULL);
+		else
+			*ret_hash = key;
+	}
+	else {
+		*ret_hash = key;
 	}
 	//uint64_t hash = (key << qf->metadata->value_bits) | (value & BITMASK(qf->metadata->value_bits));
-	uint64_t hash = key;
-	uint64_t hash_remainder   = hash & BITMASK(qf->metadata->bits_per_slot);
-	uint64_t hash_bucket_index = (hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+	uint64_t hash_remainder   = *ret_hash & BITMASK(qf->metadata->bits_per_slot);
+	uint64_t hash_bucket_index = (*ret_hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
 
 	// If no one wants this slot, we can already say for certain the item is not in the filter
 	if (!is_occupied(qf, hash_bucket_index))
-		return 0;
+		return -1;
 
 	// Otherwise, find the start of the run (all the items that want that slot) and parse for the remainder we're looking for
 	uint64_t runstart_index = hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1;
@@ -1460,16 +1465,59 @@ int qf_query_using_ll_table(const QF *qf, uint64_t key, qf_query_result *query_r
 			uint64_t ext, count;
 			int ext_len, count_len;
 			get_slot_info(qf, current_index, &ext, &ext_len, &count, &count_len);
-			if (((hash >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) & BITMASK(qf->metadata->bits_per_slot * ext_len)) == ext) { // if extensions match, return the count
-				if (query_result != NULL) {
-					query_result->count = count;
-					query_result->hash = hash & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot);
-					query_result->index = current_index;
-					query_result->minirun_rank = minirun_rank;
-				}
-				return 1;
+			if ((((*ret_hash) >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) & BITMASK(qf->metadata->bits_per_slot * ext_len)) == ext) { // if extensions match, return the count
+				return minirun_rank;
 			}
+			if (is_runend(qf, current_index++)) break; // if extensions don't match, stop if end of run, skip to next item otherwise
+			current_index += ext_len + count_len;
 			minirun_rank++;
+		}
+		else { // if first slot doesn't match, stop if end of run, skip to next item otherwise
+			if (is_runend(qf, current_index++)) break;
+			while (is_extension_or_counter(qf, current_index)) current_index++;
+		}
+	} while (current_index < qf->metadata->xnslots); // stop if reached the end of all items (should never actually reach this point because should stop at the runend)
+
+	return -1;
+}
+
+int qf_get_count_using_ll_table(const QF *qf, uint64_t key, uint64_t *ret_hash, uint8_t *ret_minirun_rank, uint8_t flags) {
+	// Convert key to hash
+	if (GET_KEY_HASH(flags) != QF_KEY_IS_HASH) {
+		if (qf->metadata->hash_mode == QF_HASH_DEFAULT)
+			*ret_hash = MurmurHash64A(((void *)&key), sizeof(key), qf->metadata->seed);
+		else if (qf->metadata->hash_mode == QF_HASH_INVERTIBLE)
+			*ret_hash = hash_64(key, -1ULL);
+		else
+			*ret_hash = key;
+	}
+	else {
+		*ret_hash = key;
+	}
+	//uint64_t hash = (key << qf->metadata->value_bits) | (value & BITMASK(qf->metadata->value_bits));
+	uint64_t hash_remainder   = *ret_hash & BITMASK(qf->metadata->bits_per_slot);
+	uint64_t hash_bucket_index = (*ret_hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+
+	// If no one wants this slot, we can already say for certain the item is not in the filter
+	if (!is_occupied(qf, hash_bucket_index))
+		return 0;
+
+	// Otherwise, find the start of the run (all the items that want that slot) and parse for the remainder we're looking for
+	uint64_t runstart_index = hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1;
+	if (runstart_index < hash_bucket_index)
+		runstart_index = hash_bucket_index;
+
+	uint64_t current_index = runstart_index;
+	*ret_minirun_rank = 0;
+	do {
+		if (get_slot(qf, current_index) == hash_remainder) { // if first slot matches, check remaining extensions
+			uint64_t ext, count;
+			int ext_len, count_len;
+			get_slot_info(qf, current_index, &ext, &ext_len, &count, &count_len);
+			if (((*ret_hash >> (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)) & BITMASK(qf->metadata->bits_per_slot * ext_len)) == ext) { // if extensions match, return the count
+				return count;
+			}
+			*ret_minirun_rank++;
 			if (is_runend(qf, current_index++)) break; // if extensions don't match, stop if end of run, skip to next item otherwise
 			current_index += ext_len + count_len;
 		}
@@ -1480,7 +1528,6 @@ int qf_query_using_ll_table(const QF *qf, uint64_t key, qf_query_result *query_r
 	} while (current_index < qf->metadata->xnslots); // stop if reached the end of all items (should never actually reach this point because should stop at the runend)
 
 	return 0;
-	
 }
 
 int insert_and_extend(QF *qf, uint64_t index, uint64_t key, uint64_t count, uint64_t other_key, uint64_t *ret_hash, uint64_t *ret_other_hash, uint8_t flags)
@@ -1676,6 +1723,7 @@ uint64_t qf_init(QF *qf, uint64_t nslots, uint64_t key_bits, uint64_t value_bits
 		qbits >>= 1;
 		qf->metadata->quotient_bits++;
 	}
+	qf->metadata->quotient_remainder_bits = qf->metadata->quotient_bits + qf->metadata->bits_per_slot;
 
 	qf->metadata->range = qf->metadata->nslots;
 	qf->metadata->range <<= qf->metadata->key_remainder_bits;

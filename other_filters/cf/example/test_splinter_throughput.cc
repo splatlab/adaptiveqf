@@ -275,7 +275,6 @@ int main(int argc, char **argv) {
 	RAND_bytes((unsigned char*)queries, num_queries * sizeof(uint64_t));
 	/*for (i = 0; i < num_queries; i++) {
 		queries[i] = (uint64_t)rand_zipfian(1.5f, 10000000ull, queries[i], -1ull);
-		//queries[i] = (uint64_t)rand_zipfian(1.5f, 10000000ull, rand(), RAND_MAX);
 		queries[i] = MurmurHash64A(&queries[i], sizeof(queries[i]), murmur_seed);
 	}*/
 	for (i = 0; i < num_queries; i++) {
