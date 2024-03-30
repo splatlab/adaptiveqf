@@ -115,11 +115,12 @@ int main(int argc, char **argv) {
 	printf("initializing data structures...\n");
 	CuckooFilter<size_t, 12> filter(num_inserts);
 
+	size_t cache_size_in_mb = 64;
 	data_config data_cfg;
         default_data_config_init(MAX_KEY_SIZE, &data_cfg);
         splinterdb_config splinterdb_cfg = (splinterdb_config){
                 .filename   = "db",
-                .cache_size = 64 * Mega,
+                .cache_size = cache_size_in_mb * Mega,
                 .disk_size  = 20 * Giga,
                 .data_cfg   = &data_cfg,
 		.io_flags   = O_RDWR | O_CREAT | O_DIRECT
@@ -204,7 +205,7 @@ int main(int argc, char **argv) {
 		printf("performing queries...\n");
 
 		char filename[100];
-		sprintf(filename, "%d-12-%lu-adversarial.csv", atoi(argv[1]), adv_freq);
+		sprintf(filename, "%d-12-%lu-%lu-adversarial.csv", atoi(argv[1]), cache_size_in_mb, adv_freq);
 		FILE *adv_fp = fopen(filename, "w");
 		fprintf(adv_fp, "queries through fprate\n");
 

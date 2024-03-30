@@ -15,6 +15,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <openssl/rand.h>
@@ -142,11 +143,12 @@ int main(int argc, char **argv)
 	  }
 	  splinterdb_lookup_result_init(backing_map, &bm_result, 0, NULL);*/
 
+	uint64_t cache_size = 512;
 	data_config data_cfg;
 	default_data_config_init(MAX_KEY_SIZE, &data_cfg);
 	splinterdb_config splinterdb_cfg = (splinterdb_config){
 		.filename   = "db",
-			.cache_size = 64 * Mega,
+			.cache_size = cache_size * Mega,
 			.disk_size  = 20 * Giga,
 			.data_cfg   = &data_cfg,
 			.io_flags   = O_RDWR | O_CREAT | O_DIRECT
@@ -209,7 +211,7 @@ int main(int argc, char **argv)
 	printf("\ngenerating query set of size %lu...\n", num_queries);
 
 	uint64_t *query_set = malloc(num_queries * sizeof(uint64_t));
-
+	mkdir("logs", 0777);
 	for (int trial = 4; trial < argc; trial++) {
 		uint64_t adv_freq = strtoull(argv[trial], NULL, 10);
 		RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
@@ -225,7 +227,7 @@ int main(int argc, char **argv)
 		int adv_set_len = 0;
 
 		char buffer[100];
-		sprintf(buffer, "adv-%lu.csv", adv_freq);
+		sprintf(buffer, "logs/adv-%lu-%lu-%lu.csv", qbits, cache_size, adv_freq);
 		FILE *adv_fp = fopen(buffer, "w");
 		fprintf(adv_fp, "queries through fprate\n");
 

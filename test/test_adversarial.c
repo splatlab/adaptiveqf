@@ -6,6 +6,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <openssl/rand.h>
@@ -37,6 +38,7 @@ int main(int argc, char **argv)
 	size_t num_inserts = (1ull << qbits) * 0.9f;//strtoull(argv[3], NULL, 10);
 	size_t num_queries = strtoull(argv[3], NULL, 10);
 	size_t adv_freq = strtoull(argv[4], NULL, 10);
+	size_t cache_size = 512;
 
 	test_results_t ret;
 	char buffer[100];
@@ -51,9 +53,10 @@ int main(int argc, char **argv)
 
 	printf("Running adversarial test with attacks every %lu queries\n", adv_freq);
 
-	sprintf(buffer, "adv_q_%lu.csv", adv_freq);
+	mkdir("logs", 0777);
+	sprintf(buffer, "logs/adv_q_%lu_%lu_%lu.csv", qbits, cache_size, adv_freq);
 
-	ret = run_adversarial_test(qbits, rbits, insert_set, num_inserts, query_set, num_queries, adv_freq, 10000, 1, buffer);
+	ret = run_adversarial_test(qbits, rbits, insert_set, num_inserts, query_set, num_queries, cache_size, adv_freq, 10000, 1, buffer);
 	if (ret.exit_code) {
 		printf("Test failed with exit code %d\n", ret.exit_code);
 	}

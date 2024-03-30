@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <openssl/rand.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 
 extern "C" {
 #include <splinterdb/splinterdb.h>
@@ -146,12 +147,14 @@ int main(int argc, char **argv) {
 	printf("initializing data structures...\n");
 	CuckooFilter<size_t, 12> filter(num_inserts);
 
+	uint64_t cache_size = 512;
+
 	remove("db");
 	data_config data_cfg;
 	default_data_config_init(MAX_KEY_SIZE, &data_cfg);
 	splinterdb_config splinterdb_cfg = (splinterdb_config){
 		.filename   = "db",
-			.cache_size = 64 * Mega,
+			.cache_size = cache_size * Mega,
 			.disk_size  = 20 * Giga,
 			.data_cfg   = &data_cfg,
 			.io_flags   = O_RDWR | O_CREAT | O_DIRECT
@@ -223,13 +226,14 @@ int main(int argc, char **argv) {
 	}*/
 
 	printf("performing queries...\n");
+	mkdir("logs", 0777);
 	for (int trial = 3; trial < argc; trial++) {
 		RAND_bytes((unsigned char*)queries, num_queries * sizeof(uint64_t));
 		size_t adv_freq = strtoull(argv[trial], NULL, 10);
 
 		char buffer[100];
-		sprintf(buffer, "adv-%lu.csv", adv_freq);
-		FILE *adv_fp = fopen("adv-.csv", "w");
+		sprintf(buffer, "logs/adv-%d-%lu-%lu-%lu.csv", atoi(argv[1]), num_queries, cache_size, adv_freq);
+		FILE *adv_fp = fopen(buffer, "w");
 		fprintf(adv_fp, "queries through fprate\n");
 
 		current_interval = measure_interval;

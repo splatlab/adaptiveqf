@@ -139,7 +139,7 @@ static inline void qf_spin_unlock(volatile int *lock)
 	return;
 }
 
-static bool qf_lock(QF *qf, uint64_t hash_bucket_index, bool small, uint8_t
+bool qf_lock(QF *qf, uint64_t hash_bucket_index, bool small, uint8_t
 										runtime_lock)
 {
 	uint64_t hash_bucket_lock_offset  = hash_bucket_index % NUM_SLOTS_TO_LOCK;
@@ -222,7 +222,7 @@ static bool qf_lock(QF *qf, uint64_t hash_bucket_index, bool small, uint8_t
 	return true;
 }
 
-static void qf_unlock(QF *qf, uint64_t hash_bucket_index, bool small)
+void qf_unlock(QF *qf, uint64_t hash_bucket_index, bool small)
 {
 	uint64_t hash_bucket_lock_offset  = hash_bucket_index % NUM_SLOTS_TO_LOCK;
 	if (small) {

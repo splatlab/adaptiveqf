@@ -543,7 +543,7 @@ void taf_init(TAF *filter, size_t n, int seed) {
         default_data_config_init(MAX_KEY_SIZE, &filter->data_cfg);
 	filter->splinterdb_cfg = (splinterdb_config){
 		.filename   = TEST_DB_NAME,
-		.cache_size = 64 * Mega,
+		.cache_size = 32 * Mega,
 		.disk_size  = 20 * Giga,
 		.data_cfg   = &filter->data_cfg,
 		.io_flags   = O_RDWR | O_CREAT | O_DIRECT

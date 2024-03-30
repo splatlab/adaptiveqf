@@ -41,8 +41,10 @@ test_results_t run_throughput_test(size_t qbits, size_t rbits, uint64_t *insert_
 
 test_results_t run_split_throughput_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, int verbose, char *inserts_outfile, char *queries_outfile);
 
-test_results_t run_adversarial_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, uint64_t adv_freq, uint64_t adv_set_max_size, int verbose, char *queries_outfile);
+test_results_t run_adversarial_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, uint64_t cache_size, uint64_t adv_freq, uint64_t adv_set_max_size, int verbose, char *queries_outfile);
 
 test_results_t run_micro_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, int verbose);
+
+test_results_t run_parallel_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, size_t num_threads);
 
 #endif

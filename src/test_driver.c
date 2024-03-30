@@ -8,6 +8,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <openssl/rand.h>
 
 #include "include/gqf.h"
@@ -220,7 +221,7 @@ test_results_t run_throughput_test(size_t qbits, size_t rbits, uint64_t *insert_
 	return results;
 }
 
-test_results_t run_adversarial_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, uint64_t adv_freq, uint64_t adv_set_max_size, int verbose, char *queries_outfile) {
+test_results_t run_adversarial_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, uint64_t cache_size, uint64_t adv_freq, uint64_t adv_set_max_size, int verbose, char *queries_outfile) {
 	test_results_t results;
 	init_test_results(&results);
 
@@ -229,6 +230,7 @@ test_results_t run_adversarial_test(size_t qbits, size_t rbits, uint64_t *insert
 
 	data_config data_cfg = qf_data_config_init();
 	splinterdb_config splinterdb_cfg = qf_splinterdb_config_init("db", &data_cfg);
+	splinterdb_cfg.cache_size = cache_size * Mega;
 	remove(splinterdb_cfg.filename);
 	splinterdb *db;
 	if (splinterdb_create(&splinterdb_cfg, &db)) {
@@ -669,6 +671,166 @@ test_results_t run_split_throughput_test(size_t qbits, size_t rbits, uint64_t *i
 	
 	splinterdb_close(&db);
 	//splinterdb_close(&bm);
+	qf_free(&qf);
+	return results;
+}
+
+
+typedef struct {
+	QF *qf;
+	splinterdb *db;
+	uint64_t *inserts;
+	size_t num_inserts;
+} thread_insert_args;
+
+void *thread_insert_keys(void *args) {
+	thread_insert_args *targs = (thread_insert_args*)args;
+
+	for (int i = 0; i < targs->num_inserts; i++) {
+		uint64_t hash_bucket_index = (targs->inserts[i] & ((1ULL << (targs->qf->metadata->quotient_bits + targs->qf->metadata->bits_per_slot)) - 1)) >> targs->qf->metadata->bits_per_slot;
+
+		if (!qf_lock(targs->qf, hash_bucket_index, false, QF_KEY_IS_HASH)) continue;
+		int ret = qf_splinter_insert(targs->qf, targs->db, targs->inserts[i], 1);
+		//qf_insert_result result;
+		//int ret = qf_insert_using_ll_table(targs->qf, targs->inserts[i], 1, &result, QF_NO_LOCK | QF_KEY_IS_HASH);
+		qf_unlock(targs->qf, hash_bucket_index, false);
+		
+		if (!ret) return;
+	}
+
+	pthread_exit(NULL);
+}
+
+test_results_t run_parallel_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, size_t num_threads) {
+	test_results_t results;
+	init_test_results(&results);
+
+	size_t num_slots = 1ull << qbits;
+	size_t minirun_id_bitmask = (1ull << (qbits + rbits)) - 1;
+
+	data_config data_cfg = qf_data_config_init();
+	splinterdb_config splinterdb_cfg = qf_splinterdb_config_init("db", &data_cfg);
+	remove(splinterdb_cfg.filename);
+	splinterdb *db;
+	if (splinterdb_create(&splinterdb_cfg, &db)) {
+		results.exit_code = -1;
+		return results;
+	}
+	splinterdb_lookup_result db_result;
+	splinterdb_lookup_result_init(db, &db_result, 0, NULL);
+
+	QF qf;
+	if (!qf_malloc(&qf, num_slots, qbits + rbits, 0, QF_HASH_INVERTIBLE, 0)) {
+		results.exit_code = -1;
+		return results;
+	}
+
+
+	double target_load = 0.9f;
+	size_t max_inserts = num_slots * target_load;
+	size_t num_inserts = insert_set_len > max_inserts ? max_inserts : insert_set_len;
+	size_t i;
+
+	size_t measure_freq = 100, curr_interval = 0;
+	size_t measure_point = num_inserts * (curr_interval + 1) / measure_freq, prev_point = 0;
+
+	pthread_t *threads = malloc(num_threads * sizeof(pthread_t));
+	thread_insert_args *args = malloc(num_threads * sizeof(thread_insert_args));
+
+	printf("Performing insertions... ");
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	uint64_t start_time = tv.tv_sec * 1000000 + tv.tv_usec, end_time;
+	for (i = 0; i < num_threads; i++) {
+		args[i].qf = &qf;
+		args[i].db = db;
+		args[i].inserts = &insert_set[num_inserts * i / num_threads];
+		args[i].num_inserts = (num_inserts * (i + 1) / num_threads) - (num_inserts * i / num_threads);
+		if (pthread_create(&threads[i], NULL, thread_insert_keys, (void*)&args[i])) {
+			fprintf(stderr, "Error creating thread %lu\n", i);
+			results.exit_code = 1;
+			return results;
+		}
+	}
+
+	for (i = 0; i < num_threads; i++) {
+		pthread_join(threads[i], NULL);
+	}
+	gettimeofday(&tv, NULL);
+	end_time = tv.tv_sec * 1000000 + tv.tv_usec;
+
+	free(threads);
+	free(args);
+
+	printf("Number of inserts:     %lu\n", num_inserts); // TODO: maybe change for actual number done
+	printf("Time for inserts:      %f\n", (double)(end_time - start_time) / 1000000);
+	printf("Insert throughput:     %f ops/sec\n", (double)num_inserts * 1000000 / (end_time - start_time));
+	results.insert_throughput = (double)num_inserts * 1000000 / (end_time - start_time);
+
+
+	int still_have_space = 1;
+	size_t full_point = num_slots * 0.95f;
+	char buffer[10 * MAX_VAL_SIZE];
+	uint64_t fp_count = 0;
+	uint64_t hash;
+	int minirun_rank;
+
+	printf("Performing queries... \n");
+	gettimeofday(&tv, NULL);
+	start_time = tv.tv_sec * 1000000 + tv.tv_usec;
+	for (i = 0; i < query_set_len; i++) {
+		if ((minirun_rank = qf_query_using_ll_table(&qf, query_set[i], &hash, QF_KEY_IS_HASH)) >= 0) {
+			hash = (hash & minirun_id_bitmask) << (64 - qf.metadata->quotient_remainder_bits);
+			slice query = padded_slice(&hash, MAX_KEY_SIZE, sizeof(hash), buffer, 0);
+			splinterdb_lookup(db, query, &db_result);
+
+			/*slice query = padded_slice(&query_set[i], MAX_KEY_SIZE, sizeof(query_set[i]), buffer, 0);
+			splinterdb_lookup(db, query, &db_result);
+			if (!splinterdb_lookup_found(&db_result)) {
+				fp_count++;
+			}*/
+
+			slice result_val;
+			splinterdb_lookup_result_value(&db_result, &result_val);
+
+			/*uint64_t orig_key = *((uint64_t*)(slice_data(result_val) + minirun_rank * MAX_VAL_SIZE));
+			if (query_set[i] != orig_key) {
+				fp_count++;
+				if (still_have_space) {
+					qf_adapt_using_ll_table(&qf, orig_key, query_set[i], minirun_rank, QF_KEY_IS_HASH);
+					if (qf.metadata->noccupied_slots >= full_point) {
+						still_have_space = 0;
+						if (verbose) fprintf(stderr, "\rFilter is full after %lu queries\n", i);
+					}
+				}
+			}*/
+
+			if (memcmp(&query_set[i], slice_data(result_val) + minirun_rank * MAX_VAL_SIZE, sizeof(uint64_t)) != 0) {
+				fp_count++;
+				if (still_have_space) {
+					uint64_t orig_key;
+					memcpy(&orig_key, slice_data(result_val) + minirun_rank * MAX_VAL_SIZE, sizeof(uint64_t));
+					qf_adapt_using_ll_table(&qf, orig_key, query_set[i], minirun_rank, QF_KEY_IS_HASH);
+					if (qf.metadata->noccupied_slots >= full_point) {
+						still_have_space = 0;
+						fprintf(stderr, "\rFilter is full after %lu queries\n", i);
+					}
+				}
+			}
+		}
+	}
+	gettimeofday(&tv, NULL);
+	end_time = tv.tv_sec * 1000000 + tv.tv_usec;
+
+	printf("Time for queries:     %f s\n", (double)(end_time - start_time) / 1000000);
+	printf("Query throughput:     %f ops/sec\n", (double)query_set_len * 1000000 / (end_time - start_time));
+
+	printf("False positives:      %lu\n", fp_count);
+	printf("False positive rate:  %f%%\n", 100. * fp_count / query_set_len);
+	results.query_throughput = (double)i * 1000000 / (end_time - start_time);
+	results.false_positive_rate = (double)fp_count / query_set_len;
+	
+	splinterdb_close(&db);
 	qf_free(&qf);
 	return results;
 }
