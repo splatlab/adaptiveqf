@@ -681,6 +681,7 @@ typedef struct {
 	splinterdb *db;
 	uint64_t *inserts;
 	size_t num_inserts;
+	uint64_t num_inserted;
 } thread_insert_args;
 
 void *thread_insert_keys(void *args) {
@@ -689,13 +690,14 @@ void *thread_insert_keys(void *args) {
 	for (int i = 0; i < targs->num_inserts; i++) {
 		uint64_t hash_bucket_index = (targs->inserts[i] & ((1ULL << (targs->qf->metadata->quotient_bits + targs->qf->metadata->bits_per_slot)) - 1)) >> targs->qf->metadata->bits_per_slot;
 
-		if (!qf_lock(targs->qf, hash_bucket_index, false, QF_KEY_IS_HASH)) continue;
-		int ret = qf_splinter_insert(targs->qf, targs->db, targs->inserts[i], 1);
+		while (!qf_lock(targs->qf, hash_bucket_index, false, QF_KEY_IS_HASH));
+		bool stop = (qf_splinter_insert(targs->qf, targs->db, targs->inserts[i], 1) == 0);
 		//qf_insert_result result;
-		//int ret = qf_insert_using_ll_table(targs->qf, targs->inserts[i], 1, &result, QF_NO_LOCK | QF_KEY_IS_HASH);
+		//bool stop = (qf_insert_using_ll_table(targs->qf, targs->inserts[i], 1, &result, QF_NO_LOCK | QF_KEY_IS_HASH) != 0);
 		qf_unlock(targs->qf, hash_bucket_index, false);
 		
-		if (!ret) return;
+		if (stop) return;
+		targs->num_inserted++;
 	}
 
 	pthread_exit(NULL);
@@ -737,7 +739,7 @@ test_results_t run_parallel_test(size_t qbits, size_t rbits, uint64_t *insert_se
 	pthread_t *threads = malloc(num_threads * sizeof(pthread_t));
 	thread_insert_args *args = malloc(num_threads * sizeof(thread_insert_args));
 
-	printf("Performing insertions... ");
+	printf("Performing insertions... \n");
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
 	uint64_t start_time = tv.tv_sec * 1000000 + tv.tv_usec, end_time;
@@ -746,6 +748,7 @@ test_results_t run_parallel_test(size_t qbits, size_t rbits, uint64_t *insert_se
 		args[i].db = db;
 		args[i].inserts = &insert_set[num_inserts * i / num_threads];
 		args[i].num_inserts = (num_inserts * (i + 1) / num_threads) - (num_inserts * i / num_threads);
+		args[i].num_inserted = 0;
 		if (pthread_create(&threads[i], NULL, thread_insert_keys, (void*)&args[i])) {
 			fprintf(stderr, "Error creating thread %lu\n", i);
 			results.exit_code = 1;
@@ -753,8 +756,11 @@ test_results_t run_parallel_test(size_t qbits, size_t rbits, uint64_t *insert_se
 		}
 	}
 
+	size_t num_inserted = 0;
 	for (i = 0; i < num_threads; i++) {
 		pthread_join(threads[i], NULL);
+		printf("Thread %lu performed %lu successful insertions\n", i, args[i].num_inserted);
+		num_inserted += args[i].num_inserted;
 	}
 	gettimeofday(&tv, NULL);
 	end_time = tv.tv_sec * 1000000 + tv.tv_usec;
@@ -762,10 +768,12 @@ test_results_t run_parallel_test(size_t qbits, size_t rbits, uint64_t *insert_se
 	free(threads);
 	free(args);
 
-	printf("Number of inserts:     %lu\n", num_inserts); // TODO: maybe change for actual number done
+	printf("Number of inserts:     %lu\n", num_inserted);
 	printf("Time for inserts:      %f\n", (double)(end_time - start_time) / 1000000);
-	printf("Insert throughput:     %f ops/sec\n", (double)num_inserts * 1000000 / (end_time - start_time));
-	results.insert_throughput = (double)num_inserts * 1000000 / (end_time - start_time);
+	printf("Insert throughput:     %f ops/sec\n", (double)num_inserted * 1000000 / (end_time - start_time));
+	results.insert_throughput = (double)num_inserted * 1000000 / (end_time - start_time);
+
+	return results;
 
 
 	int still_have_space = 1;
