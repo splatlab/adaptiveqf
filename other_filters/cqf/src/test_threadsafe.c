@@ -103,6 +103,10 @@ int main(int argc, char **argv)
 	for (uint32_t i = 0; i < nvals; i++) {
 		vals[i] = (1 * vals[i]) % cfr.metadata->range;
 	}
+
+	struct timeval timecheck;
+	gettimeofday(&timecheck, NULL);
+	clock_t start_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec, end_time;
 	
 	insert_args *args = (insert_args*)malloc(tcnt * sizeof(insert_args));
 	for (uint32_t i = 0; i < tcnt; i++) {
@@ -117,6 +121,14 @@ int main(int argc, char **argv)
 	multi_threaded_insertion(args, tcnt);
 	
 	fprintf(stdout, "Inserted all items: %ld\n", args[tcnt-1].end);
+
+	gettimeofday(&timecheck, NULL);
+	end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
+
+	fprintf(stdout, "Time taken: %f sec\n", (end_time - start_time) / 1000000.);
+	fprintf(stdout, "Throughput: %f ops/sec\n", args[tcnt-1].end * 1000000. / (end_time - start_time));
+
+	return 0;
 
 	for (uint64_t i = 0; i < args[tcnt-1].end; i++) {
 		uint64_t count = qf_count_key_value(&cfr, vals[i], 0, 0);

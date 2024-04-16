@@ -45,6 +45,8 @@ test_results_t run_adversarial_test(size_t qbits, size_t rbits, uint64_t *insert
 
 test_results_t run_micro_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, int verbose);
 
+test_results_t run_parallel_splinter_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, size_t num_threads);
+
 test_results_t run_parallel_test(size_t qbits, size_t rbits, uint64_t *insert_set, size_t insert_set_len, uint64_t *query_set, size_t query_set_len, size_t num_threads);
 
 #endif

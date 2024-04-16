@@ -139,6 +139,17 @@ int insert_key(QF *qf, splinterdb *db, uint64_t key, int count, void *buffer) {
 	return 0;
 }
 
+void csv_get_col(char* buffer, int col) {
+	int i, j;
+	for (i = 0; buffer[i] != '\0' && col > 0; i++) {
+		if (buffer[i] == ',') col--;
+	}
+	for (j = 0; buffer[i + j] != '\0' && buffer[i + j] != ','; j++) {
+		buffer[j] = buffer[i + j];
+	}
+	buffer[j] = '\0';
+}
+
 
 int main(int argc, char **argv)
 {
@@ -282,11 +293,25 @@ int main(int argc, char **argv)
 	}
 
 	uint64_t *query_set = malloc(num_queries * sizeof(uint64_t));
-	RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
+	//RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
 	/*for (i = 0; i < num_queries; i++) { // making the distrubution uniform from a limited universe
 		query_set[i] = query_set[i] % (1ull << 24);
 		query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
 	}*/
+
+	char buffer[256];
+	//FILE *shalla = fopen("data/shalla.txt", "r");
+	FILE *caida = fopen("data/20140619-140100.csv", "r");
+	fgets(buffer, sizeof(buffer), caida);
+	for (int q = 0; q < query_set_size; q++) {
+		/*fgets(buffer, sizeof(buffer), shalla);
+		query_set[q] = hash_str(buffer);*/
+		fgets(buffer, sizeof(buffer), caida);
+		csv_get_col(buffer, 3);
+		query_set[q] = hash_str(buffer);
+	}
+	//fclose(shalla);
+	fclose(caida);
 
 	printf("performing queries... 0%%");
 	uint64_t warmup_queries = 0;//49999999ull;

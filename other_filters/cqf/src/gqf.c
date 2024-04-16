@@ -143,7 +143,7 @@ static inline void qf_spin_unlock(volatile int *lock)
 	return;
 }
 
-static bool qf_lock(QF *qf, uint64_t hash_bucket_index, bool small, uint8_t
+bool qf_lock(QF *qf, uint64_t hash_bucket_index, bool small, uint8_t
 										runtime_lock)
 {
 	uint64_t hash_bucket_lock_offset  = hash_bucket_index % NUM_SLOTS_TO_LOCK;
@@ -226,7 +226,7 @@ static bool qf_lock(QF *qf, uint64_t hash_bucket_index, bool small, uint8_t
 	return true;
 }
 
-static void qf_unlock(QF *qf, uint64_t hash_bucket_index, bool small)
+void qf_unlock(QF *qf, uint64_t hash_bucket_index, bool small)
 {
 	uint64_t hash_bucket_lock_offset  = hash_bucket_index % NUM_SLOTS_TO_LOCK;
 	if (small) {
@@ -1199,9 +1199,15 @@ static inline int insert1(QF *qf, __uint128_t hash, uint8_t runtime_lock)
 			(hash_bucket_block_offset % 64);
 		
 		ret_distance = 0;
+#ifdef INC_PC
+		modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+		modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
+		modify_metadata(&qf->runtimedata->pc_nelts, 1);
+#elif defined(INC_NORMAL)
 		qf->metadata->ndistinct_elts++;
 		qf->metadata->noccupied_slots++;
 		qf->metadata->nelts++;
+#endif
 	} else {
 		uint64_t runend_index              = run_end(qf, hash_bucket_index);
 		int operation = 0; /* Insert into empty bucket */
@@ -1269,7 +1275,11 @@ static inline int insert1(QF *qf, __uint128_t hash, uint8_t runtime_lock)
 				operation = 1;
 				insert_index = runstart_index;
 				new_value = hash_remainder;
+#ifdef INC_PC
+				modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+#elif defined(INC_NORMAL)
 				qf->metadata->ndistinct_elts++;
+#endif
 
 				/* This is the first time we're inserting this remainder, but
 					 there are larger remainders already in the run. */
@@ -1277,7 +1287,11 @@ static inline int insert1(QF *qf, __uint128_t hash, uint8_t runtime_lock)
 				operation = 2; /* Inserting */
 				insert_index = runstart_index;
 				new_value = hash_remainder;
+#ifdef INC_PC
+				modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+#elif defined(INC_NORMAL)
 				qf->metadata->ndistinct_elts++;
+#endif
 
 				/* Cases below here: we're incrementing the (simple or
 					 extended) counter for this remainder. */
@@ -1364,7 +1378,11 @@ static inline int insert1(QF *qf, __uint128_t hash, uint8_t runtime_lock)
 				}
 			}
 		} else {
+#ifdef INC_PC
+			modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+#elif defined(INC_NORMAL)
 			qf->metadata->ndistinct_elts++;
+#endif
 		}
 
 		if (operation >= 0) {
@@ -1416,9 +1434,17 @@ static inline int insert1(QF *qf, __uint128_t hash, uint8_t runtime_lock)
 					get_block(qf, i)->offset++;
 				assert(get_block(qf, i)->offset != 0);
 			}
+#ifdef INC_PC
+			modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
+#elif defined(INC_NORMAL)
 			qf->metadata->noccupied_slots++;
+#endif
 		}
+#ifdef INC_PC
+		modify_metadata(&qf->runtimedata->pc_nelts, 1);
+#elif defined(INC_NORMAL)
 		qf->metadata->nelts++;
+#endif
 		METADATA_WORD(qf, occupieds, hash_bucket_index) |= 1ULL <<
 			(hash_bucket_block_offset % 64);
 	}
@@ -1901,7 +1927,11 @@ int qf_insert(QF *qf, uint64_t key, uint64_t value, uint64_t count, uint8_t
 {
 	// We fill up the CQF up to 95% load factor.
 	// This is a very conservative check.
-	if (qf->metadata->noccupied_slots >= qf->metadata->nslots * 0.95) {
+#ifdef INC_PC
+	if (qf_get_num_occupied_slots(qf) >= qf->metadata->nslots * 0.95) {
+#else
+		if (qf->metadata->noccupied_slots >= qf->metadata->nslots * 0.95) {
+#endif
 		if (qf->runtimedata->auto_resize) {
 			/*fprintf(stdout, "Resizing the CQF.\n");*/
 			if (qf->runtimedata->container_resize(qf, qf->metadata->nslots * 2) < 0)
@@ -2167,7 +2197,7 @@ uint64_t qf_get_nslots(const QF *qf) {
 	return qf->metadata->nslots;
 }
 uint64_t qf_get_num_occupied_slots(const QF *qf) {
-	pc_sync(&qf->runtimedata->pc_noccupied_slots);
+	//pc_sync(&qf->runtimedata->pc_noccupied_slots);
 	return qf->metadata->noccupied_slots;
 }
 

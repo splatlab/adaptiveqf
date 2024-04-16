@@ -29,6 +29,26 @@ void bp() {
 	bp_count++;
 }
 
+void csv_get_col(char* buffer, int col) {
+	int i, j;
+	for (i = 0; buffer[i] != '\0' && col > 0; i++) {
+		if (buffer[i] == ',') col--;
+	}
+	for (j = 0; buffer[i + j] != '\0' && buffer[i + j] != ','; j++) {
+		buffer[j] = buffer[i + j];
+	}
+	buffer[j] = '\0';
+}
+
+uint64_t hash_str(char *str) {
+	uint64_t hash = 5381;
+	int c;
+	while ((c = *str++)) {
+		hash = ((hash << 5) + hash) + c;
+	}
+	return hash;
+}
+
 int main(int argc, char **argv)
 {
 	if (argc < 5) {
@@ -176,6 +196,19 @@ int main(int argc, char **argv)
 		query_set[i] = query_set[i] % (1ull << 24);
 		query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
 	}*/
+	/*char dataset_buffer[256];
+	//FILE *shalla = fopen("data/shalla.txt", "r");
+	FILE *caida = fopen("data/20140619-140100.csv", "r");
+	fgets(dataset_buffer, sizeof(dataset_buffer), caida);
+	for (int q = 0; q < num_queries; q++) {
+		//fgets(buffer, sizeof(buffer), shalla);
+		//query_set[q] = hash_str(buffer);
+		fgets(dataset_buffer, sizeof(dataset_buffer), caida);
+		csv_get_col(dataset_buffer, 3);
+		query_set[q] = hash_str(dataset_buffer);
+	}
+	//fclose(shalla);
+	fclose(caida);*/
 
 	printf("performing queries... 0%%");
 	uint64_t warmup_queries = 0;//49999999ull;
@@ -196,7 +229,7 @@ int main(int argc, char **argv)
 	gettimeofday(&timecheck, NULL);
 	start_time = interval_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 	for (i = 0; i < num_queries; i++) {
-		if (qf_query_using_ll_table(&qf, query_set[i], &query_result, QF_KEY_IS_HASH)) {
+		if (qf_query_using_ll_table(&qf, query_set[i], &query_result, QF_KEY_IS_HASH) >= 0) {
 			uint64_t temp = query_result.hash & ((1ull << (qbits + rbits)) - 1);
 			slice query = padded_slice(&temp, MAX_KEY_SIZE, sizeof(temp), buffer, 0);
 			splinterdb_lookup(database, query, &db_result);

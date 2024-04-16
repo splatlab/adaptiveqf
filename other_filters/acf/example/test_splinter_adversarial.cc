@@ -115,7 +115,7 @@ int main(int argc, char **argv) {
 	printf("initializing data structures...\n");
 	CuckooFilter<size_t, 12> filter(num_inserts);
 
-	size_t cache_size_in_mb = 64;
+	size_t cache_size_in_mb = 256;
 	data_config data_cfg;
         default_data_config_init(MAX_KEY_SIZE, &data_cfg);
         splinterdb_config splinterdb_cfg = (splinterdb_config){

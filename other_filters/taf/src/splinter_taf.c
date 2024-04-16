@@ -33,6 +33,26 @@
 #define MAX_KEY_SIZE 16
 #define MAX_VAL_SIZE 16
 
+void csv_get_col(char* buffer, int col) {
+	int i, j;
+	for (i = 0; buffer[i] != '\0' && col > 0; i++) {
+		if (buffer[i] == ',') col--;
+	}
+	for (j = 0; buffer[i + j] != '\0' && buffer[i + j] != ','; j++) {
+		buffer[j] = buffer[i + j];
+	}
+	buffer[j] = '\0';
+}
+
+uint64_t hash_str(char *str) {
+	uint64_t hash = 5381;
+	int c;
+	while ((c = *str++)) {
+		hash = ((hash << 5) + hash) + c;
+	}
+	return hash;
+}
+
 uint64_t db_insert_count = 0, db_update_count = 0, db_query_count = 0;
 
 struct backing_data {
@@ -1607,6 +1627,20 @@ void test_splinter_throughput(int qbits, uint64_t num_queries, uint64_t num_inc_
 		//query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
 	}
 
+	char dataset_buffer[256];
+	FILE *shalla = fopen("../../../data/shalla.txt", "r");
+	FILE *caida = fopen("../../../data/20140619-140100.csv", "r");
+	fgets(dataset_buffer, sizeof(dataset_buffer), caida);
+	for (int q = 0; q < num_queries; q++) {
+		fgets(dataset_buffer, sizeof(dataset_buffer), shalla);
+		query_set[q] = hash_str(dataset_buffer);
+		//fgets(dataset_buffer, sizeof(dataset_buffer), caida);
+		//csv_get_col(dataset_buffer, 3);
+		//query_set[q] = hash_str(dataset_buffer);
+	}
+	fclose(shalla);
+	fclose(caida);
+
 	printf("Performing queries\n");
 	FILE *queries_fp = fopen("stats_splinter_queries.csv", "w");
 	fprintf(queries_fp, "queries through\n");
@@ -1839,7 +1873,7 @@ int main(int argc, char **argv) {
 	}
 	//test_splinter_ops();
 	//test_splinter_veracity();
-	//test_splinter_throughput(atoi(argv[1]), strtoull(argv[2], NULL, 10), strtoull(argv[3], NULL, 10)); // ./splinter_taf [log of nslots] [num queries] [num inc queries]
-	test_splinter_adversarial(atoi(argv[1]), strtoull(argv[2], NULL, 10), &argv[3], argc - 3); // ./splinter_taf [log of nslots] [num queries] [adv freq]
+	test_splinter_throughput(atoi(argv[1]), strtoull(argv[2], NULL, 10), strtoull(argv[3], NULL, 10)); // ./splinter_taf [log of nslots] [num queries] [num inc queries]
+	//test_splinter_adversarial(atoi(argv[1]), strtoull(argv[2], NULL, 10), &argv[3], argc - 3); // ./splinter_taf [log of nslots] [num queries] [adv freq]
 }
 #endif // TEST_SPLINTER_TAF

@@ -39,6 +39,26 @@
 #define MAX_KEY_SIZE 16
 #define MAX_VAL_SIZE 16
 
+void csv_get_col(char* buffer, int col) {
+	int i, j;
+	for (i = 0; buffer[i] != '\0' && col > 0; i++) {
+		if (buffer[i] == ',') col--;
+	}
+	for (j = 0; buffer[i + j] != '\0' && buffer[i + j] != ','; j++) {
+		buffer[j] = buffer[i + j];
+	}
+	buffer[j] = '\0';
+}
+
+uint64_t hash_str(char *str) {
+	uint64_t hash = 5381;
+	int c;
+	while ((c = *str++)) {
+		hash = ((hash << 5) + hash) + c;
+	}
+	return hash;
+}
+
 void bp2() {
 	return;
 }
@@ -260,10 +280,25 @@ int main(int argc, char **argv)
 	printf("generating query set of size %lu...\n", num_queries);
 	uint64_t *query_set = malloc(num_queries * sizeof(uint64_t));
 	RAND_bytes((unsigned char*)query_set, num_queries * sizeof(uint64_t));
-	for (i = 0; i < num_queries; i++) { // making the distrubution uniform from a limited universe
+	/*for (i = 0; i < num_queries; i++) { // making the distrubution uniform from a limited universe
 		query_set[i] = query_set[i] % (1ull << 24);
 		query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
+	}*/
+
+	char dataset_buffer[256];
+	FILE *shalla = fopen("../../data/shalla.txt", "r");
+	FILE *caida = fopen("../../data/20140619-140100.csv", "r");
+	fgets(dataset_buffer, sizeof(dataset_buffer), caida);
+	for (int q = 0; q < num_queries; q++) {
+		//fgets(dataset_buffer, sizeof(dataset_buffer), shalla);
+		//query_set[q] = hash_str(dataset_buffer);
+		fgets(dataset_buffer, sizeof(dataset_buffer), caida);
+		csv_get_col(dataset_buffer, 3);
+		query_set[q] = hash_str(dataset_buffer);
 	}
+	fclose(shalla);
+	fclose(caida);
+	
 
 	printf("performing queries... 0%%");
 	current_interval = measure_interval;

@@ -143,7 +143,7 @@ int main(int argc, char **argv)
 	  }
 	  splinterdb_lookup_result_init(backing_map, &bm_result, 0, NULL);*/
 
-	uint64_t cache_size = 512;
+	uint64_t cache_size = 32;
 	data_config data_cfg;
 	default_data_config_init(MAX_KEY_SIZE, &data_cfg);
 	splinterdb_config splinterdb_cfg = (splinterdb_config){
@@ -295,6 +295,7 @@ int main(int argc, char **argv)
 		gettimeofday(&timecheck, NULL);
 		end_time = timecheck.tv_sec * 1000000 + timecheck.tv_usec;
 
+		fclose(adv_fp);
 		printf("\n");
 
 		printf("time for queries:      %f sec\n", (double)(end_time - start_time) / 1000000);

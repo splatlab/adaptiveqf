@@ -28,6 +28,26 @@ extern "C" {
 
 using cuckoofilter::CuckooFilter;
 
+void csv_get_col(char* buffer, int col) {
+	int i, j;
+	for (i = 0; buffer[i] != '\0' && col > 0; i++) {
+		if (buffer[i] == ',') col--;
+	}
+	for (j = 0; buffer[i + j] != '\0' && buffer[i + j] != ','; j++) {
+		buffer[j] = buffer[i + j];
+	}
+	buffer[j] = '\0';
+}
+
+uint64_t hash_str(char *str) {
+	uint64_t hash = 5381;
+	int c;
+	while ((c = *str++)) {
+		hash = ((hash << 5) + hash) + c;
+	}
+	return hash;
+}
+
 uint64_t rand_uniform(uint64_t max) {
         if (max <= RAND_MAX) return rand() % max;
         uint64_t a = rand();
@@ -277,10 +297,24 @@ int main(int argc, char **argv) {
 		queries[i] = (uint64_t)rand_zipfian(1.5f, 10000000ull, queries[i], -1ull);
 		queries[i] = MurmurHash64A(&queries[i], sizeof(queries[i]), murmur_seed);
 	}*/
-	for (i = 0; i < num_queries; i++) {
+	/*for (i = 0; i < num_queries; i++) {
 		queries[i] = queries[i] % (1ull << 24);
 		queries[i] = MurmurHash64A(&queries[i], sizeof(queries[i]), murmur_seed);
+	}*/
+
+	char dataset_buffer[256];
+	FILE *shalla = fopen("../../data/shalla.txt", "r");
+	FILE *caida = fopen("../../data/20140619-140100.csv", "r");
+	fgets(dataset_buffer, sizeof(dataset_buffer), caida);
+	for (int q = 0; q < num_queries; q++) {
+		//fgets(dataset_buffer, sizeof(dataset_buffer), shalla);
+		//queries[q] = hash_str(dataset_buffer);
+		fgets(dataset_buffer, sizeof(dataset_buffer), caida);
+		csv_get_col(dataset_buffer, 3);
+		queries[q] = hash_str(dataset_buffer);
 	}
+	fclose(shalla);
+	fclose(caida);
 
 	printf("performing queries...\n");
 	uint64_t warmup_queries = 49999999ull;

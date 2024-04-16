@@ -5,13 +5,19 @@
 *.csv
 *.txt
 *.o
+*.log
+*.out
+*.output
 
 db
 bm
 stats*
+
+perf.*
 
 .stxxl
 stxxl.*
 
 obj/
 external/
+data/

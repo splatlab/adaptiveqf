@@ -20,6 +20,8 @@
  * the content of the slots.
  ******************************************************************/
 
+#define METADATA_INC_MODE 1 // 0 for no inc, 1 for direct in, 2 for pc inc
+
 #define MAX_VALUE(nbits) ((1ULL << (nbits)) - 1)
 #define BITMASK(nbits)                                    \
   ((nbits) == 64 ? 0xffffffffffffffff : MAX_VALUE(nbits))
@@ -1152,7 +1154,7 @@ static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_in
 	//printf("remainder = %lu   \t index = %lu\n", hash_remainder, hash_bucket_index);
 
 	if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
-		if (!qf_lock(qf, hash_bucket_index, /*small*/ false, runtime_lock))
+		if (!qf_lock(qf, hash_bucket_index, /*small*/ true, runtime_lock))
 			return QF_COULDNT_LOCK;
 	}
 
@@ -1230,7 +1232,7 @@ static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_in
 						*ret_hash_len = (*ret_hash_len * qf->metadata->bits_per_slot) + qf->metadata->quotient_bits + qf->metadata->bits_per_slot;
 
 						if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
-							qf_unlock(qf, hash_bucket_index, /*small*/ false);
+							qf_unlock(qf, hash_bucket_index, /*small*/ true);
 						}
 						return 0;
 					}
@@ -1255,6 +1257,9 @@ static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_in
 			} while (current_index < qf->metadata->xnslots);
 			if (current_index >= qf->metadata->xnslots) {
 				printf("error: program reached end of filter without finding runend\n");
+				if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
+					qf_unlock(qf, hash_bucket_index, /*small*/ true);
+				}
 				return QF_NO_SPACE;
 			}
 
@@ -1278,7 +1283,7 @@ static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_in
 	}
 
 	if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
-		qf_unlock(qf, hash_bucket_index, /*small*/ false);
+		qf_unlock(qf, hash_bucket_index, /*small*/ true);
 	}
 
 	return 1;
@@ -1298,7 +1303,7 @@ static inline int insert_using_ll_table(QF *qf, qf_insert_result *result, uint64
 	//printf("remainder = %lu   \t index = %lu\n", hash_remainder, hash_bucket_index);
 
 	if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
-		if (!qf_lock(qf, hash_bucket_index, false, runtime_lock))
+		if (!qf_lock(qf, hash_bucket_index, true, runtime_lock))
 			return QF_COULDNT_LOCK;
 	}
 
@@ -1311,12 +1316,15 @@ static inline int insert_using_ll_table(QF *qf, qf_insert_result *result, uint64
 		METADATA_WORD(qf, runends, hash_bucket_index) |= 1ULL << hash_bucket_block_offset;
 		METADATA_WORD(qf, occupieds, hash_bucket_index) |= 1ULL << hash_bucket_block_offset;
 		
-		//modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
-		//modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
-		//modify_metadata(&qf->runtimedata->pc_nelts, 1);
+#if METADATA_INC_MODE == 1
 		qf->metadata->ndistinct_elts++;
 		qf->metadata->noccupied_slots++;
 		qf->metadata->nelts++;
+#elif METADATA_INC_MODE == 2
+		modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+		modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
+		modify_metadata(&qf->runtimedata->pc_nelts, 1);
+#endif
 
 		if (count > 1) {
 			insert_and_extend(qf, hash_bucket_index, result->hash, count - 1, result->hash, result->hash, result->hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
@@ -1330,12 +1338,16 @@ static inline int insert_using_ll_table(QF *qf, qf_insert_result *result, uint64
 			
 			METADATA_WORD(qf, runends, runstart_index) |= 1ULL << (runstart_index % 64);
 			METADATA_WORD(qf, occupieds, hash_bucket_index) |= 1ULL << hash_bucket_block_offset;
-			//modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
-			//modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
-			//modify_metadata(&qf->runtimedata->pc_nelts, count);
+
+#if METADATA_INC_MODE == 1
 			qf->metadata->ndistinct_elts++;
 			qf->metadata->noccupied_slots++;
 			qf->metadata->nelts++;
+#elif METADATA_INC_MODE == 2
+			modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+			modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
+			modify_metadata(&qf->runtimedata->pc_nelts, count);
+#endif
 
 			if (count > 1) insert_and_extend(qf, hash_bucket_index, result->hash, count - 1, result->hash, result->hash, result->hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash is a placeholders
 		} else { /* Non-empty bucket */
@@ -1370,6 +1382,9 @@ static inline int insert_using_ll_table(QF *qf, qf_insert_result *result, uint64
 				}
 			} while (current_index < qf->metadata->xnslots);
 			if (current_index >= qf->metadata->xnslots) {
+				if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
+					qf_unlock(qf, hash_bucket_index, /*small*/ true);
+				}
 				printf("error: program reached end of filter without finding runend\n");
 				return QF_NO_SPACE;
 			}
@@ -1380,19 +1395,22 @@ static inline int insert_using_ll_table(QF *qf, qf_insert_result *result, uint64
 				METADATA_WORD(qf, runends, current_index) ^= (1ULL << (current_index % QF_SLOTS_PER_BLOCK));
 			}
 			
-			//modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
-			//modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
-			//modify_metadata(&qf->runtimedata->pc_nelts, count);
+#if METADATA_INC_MODE == 1
 			qf->metadata->ndistinct_elts++;
 			qf->metadata->noccupied_slots++;
-			qf->metadata->nelts++;
+			qf->metadata->nelts += count;
+#elif METADATA_INC_MODE == 2
+			modify_metadata(&qf->runtimedata->pc_ndistinct_elts, 1);
+			modify_metadata(&qf->runtimedata->pc_noccupied_slots, 1);
+			modify_metadata(&qf->runtimedata->pc_nelts, count);
+#endif
 
 			if (count > 1) insert_and_extend(qf, insert_index, result->hash, count - 1, result->hash, result->hash, result->hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
 		}
 	}
 
 	if (GET_NO_LOCK(runtime_lock) != QF_NO_LOCK) {
-		qf_unlock(qf, hash_bucket_index, /*small*/ false);
+		qf_unlock(qf, hash_bucket_index, /*small*/ true);
 	}
 
 	return 0;
@@ -1402,8 +1420,11 @@ int qf_insert_using_ll_table(QF *qf, uint64_t key, uint64_t count, qf_insert_res
 {
 	// We fill up the CQF up to 95% load factor.
 	// This is a very conservative check.
-	//if (qf_get_num_occupied_slots(qf) >= qf->metadata->nslots * 0.95) {
+#if METADATA_INC_MODE == 2
+	if (qf_get_num_occupied_slots(qf) >= qf->metadata->nslots * 0.95) {
+#else
 	if (qf->metadata->noccupied_slots >= qf->metadata->nslots * 0.95) {
+#endif
 		if (qf->runtimedata->auto_resize) {
 			/*fprintf(stdout, "Resizing the CQF.\n");*/
 			if (qf->runtimedata->container_resize(qf, qf->metadata->nslots * 2) < 0)
@@ -2283,7 +2304,7 @@ uint64_t qf_get_nslots(const QF *qf) {
 	return qf->metadata->nslots;
 }
 uint64_t qf_get_num_occupied_slots(const QF *qf) {
-	pc_sync(&qf->runtimedata->pc_noccupied_slots);
+	//pc_sync(&qf->runtimedata->pc_noccupied_slots);
 	return qf->metadata->noccupied_slots;
 }
 

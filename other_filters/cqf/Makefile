@@ -1,4 +1,4 @@
-CTARGETS=test_splinter_ops test_splinter_throughput test_splinter_zipfian_histogram test_splinter_adversarial test_micro_throughput test_micro_super #test_threadsafe test_pc bm test_hash_accesses #test_fill_varied_throughput #test
+CTARGETS=test_splinter_ops test_splinter_throughput test_splinter_zipfian_histogram test_splinter_adversarial test_micro_throughput test_micro_super test_parallel test_threadsafe #test_pc bm test_hash_accesses #test_fill_varied_throughput #test
 CXXTARGETS=test_ext_throughput test_adversarial
 
 ifdef D
@@ -8,7 +8,7 @@ ifdef D
 	SPLINTERPATH=../../external/splinterdb/btree
 else
 	DEBUG=
-	OPT=-Ofast -DNDEBUG
+	OPT=-O3 -g
 	#SPLINTERPATH=../../external/splinterdb/build/release/lib
 	SPLINTERPATH=../../external/splinterdb/btree
 endif
@@ -54,6 +54,10 @@ test_micro_throughput:                                                    $(OBJD
                                                                                 $(OBJDIR)/partitioned_counter.o 
 
 test_micro_super:                                                    $(OBJDIR)/test_micro_super.o $(OBJDIR)/gqf.o \
+                                                                                $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
+                                                                                $(OBJDIR)/partitioned_counter.o
+
+test_parallel:                                                    $(OBJDIR)/test_parallel.o $(OBJDIR)/gqf.o \
                                                                                 $(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o \
                                                                                 $(OBJDIR)/partitioned_counter.o
 

@@ -325,6 +325,9 @@ extern "C" {
 	void qf_dump(const QF *);
 	void qf_dump_metadata(const QF *qf);
 
+	bool qf_lock(QF *qf, uint64_t hash_bucket_index, bool small, uint8_t runtime_lock);
+	void qf_unlock(QF *qf, uint64_t hash_bucket_index, bool small);
+
 
 #ifdef __cplusplus
 }
