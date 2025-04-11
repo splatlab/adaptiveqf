@@ -95,3 +95,25 @@ int qf_splinter_insert_split(QF *qf, splinterdb *db, splinterdb *bm, uint64_t ke
 		return result.minirun_existed + 1;
 	}
 }
+
+int qf_splinter_query_and_adapt(QF *qf, splinterdb *db, uint64_t key) {
+	uint64_t hash;
+	int minirun_rank = qf_query_using_ll_table(qf, key, &hash, QF_KEY_IS_HASH);
+	if (minirun_rank >= 0) {
+		hash = (hash & ((1ull << (qf->metadata->quotient_remainder_bits)) - 1)) << (64 - qf->metadata->quotient_remainder_bits);
+		char buffer[10 * MAX_KEY_SIZE];
+		slice query = padded_slice(&hash, MAX_KEY_SIZE, sizeof(hash), buffer, 0);
+		splinterdb_lookup_result db_result;
+		splinterdb_lookup(db, query, &db_result);
+		slice result_val;
+		splinterdb_lookup_result_value(&db_result, &result_val);
+		if (memcmp(&key, slice_data(result_val) + minirun_rank * MAX_VAL_SIZE, sizeof(uint64_t)) != 0) {
+			uint64_t orig_key;
+			memcpy(&orig_key, slice_data(result_val) + minirun_rank * MAX_VAL_SIZE, sizeof(uint64_t));
+			qf_adapt_using_ll_table(qf, orig_key, key, minirun_rank, QF_KEY_IS_HASH);
+			return -1;
+		}
+		return 1;
+	}
+	return 0;
+}

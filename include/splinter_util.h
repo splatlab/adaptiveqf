@@ -33,5 +33,6 @@ int db_insert(splinterdb *database, const void *key_data, const size_t key_len, 
 
 int qf_splinter_insert(QF *qf, splinterdb *db, uint64_t key, int count);
 int qf_splinter_insert_split(QF *qf, splinterdb *db, splinterdb *bm, uint64_t key, uint64_t val);
+int qf_splinter_query_and_adapt(QF *qf, splinterdb *db, uint64_t key);
 
 #endif
