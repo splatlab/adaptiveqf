@@ -76,7 +76,6 @@ int qf_splinter_insert(QF *qf, splinterdb *db, uint64_t key, int count) {
 		result.minirun_id <<= 64 - qf->metadata->quotient_remainder_bits;
 		if (!db_insert(db, &result.minirun_id, sizeof(result.minirun_id), &key, sizeof(key), result.minirun_existed, 0)) return result.minirun_existed + 1;
 
-		//if (!db_insert(db, &result.minirun_id, sizeof(result.minirun_id), &key, sizeof(key), result.minirun_existed, 0)) return result.minirun_existed + 1;
 		return 0;
 	}
 }
@@ -91,6 +90,7 @@ int qf_splinter_insert_split(QF *qf, splinterdb *db, splinterdb *bm, uint64_t ke
 		if (db_insert(db, &key, sizeof(key), &val, sizeof(val), 0, 0)) return 0;
 		assert(result.minirun_id == key % (1 << (qf->metadata->quotient_bits + qf->metadata->bits_per_slot)));
 		assert(sizeof(result.minirun_id) <= MAX_KEY_SIZE);
+		result.minirun_id <<= 64 - qf->metadata->quotient_remainder_bits;
 		if (db_insert(bm, &result.minirun_id, sizeof(result.minirun_id), &key, sizeof(key), result.minirun_existed, 0)) return 0;
 		return result.minirun_existed + 1;
 	}
