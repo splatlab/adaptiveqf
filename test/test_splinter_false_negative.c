@@ -36,9 +36,9 @@ int main(int argc, char **argv) {
     test_assert(qf_splinter_insert(&qf, db, 1, 1) == 1, "insert 1"); // Normal insert
     test_assert(qf_splinter_insert(&qf, db, 1 + (1ull << (qbits + rbits)), 1) == 2, "insert 2"); // Insert into existing minirun
 
-    test_assert(qf_splinter_query_and_adapt(&qf, db, 1 + (1ull << (qbits + rbits))) > 0, "query 1"); // Query finds key 2
-    //test_assert(qf_splinter_query_and_adapt(&qf, db, 1) < 0, "query 2"); // Query misses key 1 (false negative)
-    test_assert(qf_splinter_query_and_adapt(&qf, db, 1) > 0, "query 3"); // Query finds key 1 (because of adapt)
+    test_assert(qf_splinter_query_and_adapt(&qf, db, &db_result, 1 + (1ull << (qbits + rbits))) > 0, "query 1"); // Query finds key 2
+    //test_assert(qf_splinter_query_and_adapt(&qf, db, &db_result, 1) < 0, "query 2"); // Query misses key 1 (false negative)
+    test_assert(qf_splinter_query_and_adapt(&qf, db, &db_result, 1) > 0, "query 3"); // Query finds key 1 (because of adapt)
 
     splinterdb_close(&db);
     qf_free(&qf);

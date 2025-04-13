@@ -72,7 +72,7 @@ int qf_splinter_insert(QF *qf, splinterdb *db, uint64_t key, int count) {
 	else {
 		result.minirun_id <<= 64 - qf->metadata->quotient_remainder_bits;
 		if (result.minirun_existed) {
-			char buffer[10 * MAX_KEY_SIZE];
+			char buffer[2 * MAX_KEY_SIZE];
 			slice query = padded_slice(&result.minirun_id, MAX_KEY_SIZE, sizeof(result.minirun_id), buffer, 0);
 			splinterdb_lookup_result db_result;
 			splinterdb_lookup_result_init(db, &db_result, 0, NULL);
@@ -112,27 +112,77 @@ int qf_splinter_insert_split(QF *qf, splinterdb *db, splinterdb *bm, uint64_t ke
 		assert(result.minirun_id == key % (1 << (qf->metadata->quotient_remainder_bits)));
 		assert(sizeof(result.minirun_id) <= MAX_KEY_SIZE);
 		result.minirun_id <<= 64 - qf->metadata->quotient_remainder_bits;
+		
+		if (result.minirun_existed) {
+			char buffer[2 * MAX_KEY_SIZE];
+			slice query = padded_slice(&result.minirun_id, MAX_KEY_SIZE, sizeof(result.minirun_id), buffer, 0);
+			splinterdb_lookup_result bm_result;
+			splinterdb_lookup_result_init(bm, &bm_result, 0, NULL);
+			splinterdb_lookup(bm, query, &bm_result);
+			slice result_val;
+			splinterdb_lookup_result_value(&bm_result, &result_val);
+			int most_overlap = 0;
+			uint64_t most_overlapping_key;
+			for (int i = 0; i + MAX_KEY_SIZE <= slice_length(result_val); i += MAX_KEY_SIZE) {
+				uint64_t existing_key = *((uint64_t*)(slice_data(result_val) + i));
+				if (existing_key == key) continue;
+				assert(existing_key % (1 << (qf->metadata->quotient_remainder_bits)) == key % (1 << (qf->metadata->quotient_remainder_bits)));
+				int overlap = __builtin_ctzll(existing_key ^ key);
+				if (overlap > most_overlap) {
+					most_overlap = overlap;
+					most_overlapping_key = existing_key;
+				}
+			}
+			if (most_overlap > 0) {
+				qf_adapt_using_ll_table(qf, key, most_overlapping_key, 0, QF_KEY_IS_HASH);
+			}
+		}
+
 		if (db_insert(bm, &result.minirun_id, sizeof(result.minirun_id), &key, sizeof(key), result.minirun_existed, 0)) return 0;
 		return result.minirun_existed + 1;
 	}
 }
 
-int qf_splinter_query_and_adapt(QF *qf, splinterdb *db, uint64_t key) {
+int qf_splinter_query_and_adapt(QF *qf, splinterdb *db, splinterdb_lookup_result *db_result, uint64_t key) {
 	uint64_t hash;
 	int minirun_rank = qf_query_using_ll_table(qf, key, &hash, QF_KEY_IS_HASH);
 	if (minirun_rank >= 0) {
 		hash = (hash & ((1ull << (qf->metadata->quotient_remainder_bits)) - 1)) << (64 - qf->metadata->quotient_remainder_bits);
-		char buffer[10 * MAX_KEY_SIZE];
+		char buffer[2 * MAX_KEY_SIZE];
 		slice query = padded_slice(&hash, MAX_KEY_SIZE, sizeof(hash), buffer, 0);
-		splinterdb_lookup_result db_result;
-		splinterdb_lookup_result_init(db, &db_result, 0, NULL);
-		splinterdb_lookup(db, query, &db_result);
+		splinterdb_lookup(db, query, db_result);
 		slice result_val;
-		splinterdb_lookup_result_value(&db_result, &result_val);
+		splinterdb_lookup_result_value(db_result, &result_val);
 		assert(slice_length(result_val) >= (minirun_rank + 1) * MAX_VAL_SIZE);
 		if (memcmp(&key, slice_data(result_val) + minirun_rank * MAX_VAL_SIZE, sizeof(uint64_t)) != 0) {
 			uint64_t orig_key;
 			memcpy(&orig_key, slice_data(result_val) + minirun_rank * MAX_VAL_SIZE, sizeof(uint64_t));
+			qf_adapt_using_ll_table(qf, orig_key, key, minirun_rank, QF_KEY_IS_HASH);
+			return -1;
+		}
+		return 1;
+	}
+	return 0;
+}
+
+int qf_splinter_query_and_adapt_split(QF *qf, splinterdb *db, splinterdb_lookup_result *db_result, splinterdb *bm, splinterdb_lookup_result *bm_result, uint64_t key) {
+	uint64_t hash;
+	int minirun_rank = qf_query_using_ll_table(qf, key, &hash, QF_KEY_IS_HASH);
+	if (minirun_rank >= 0) {
+		char buffer[2 * MAX_KEY_SIZE];
+		slice db_query = padded_slice(&key, MAX_KEY_SIZE, sizeof(key), buffer, 0);
+		splinterdb_lookup(db, db_query, db_result);
+		slice result_val;
+		splinterdb_lookup_result_value(db_result, &result_val);
+		if (!splinterdb_lookup_found(db_result)) {
+			hash = (hash & ((1ull << (qf->metadata->quotient_remainder_bits)) - 1)) << (64 - qf->metadata->quotient_remainder_bits);
+			slice bm_query = padded_slice(&hash, MAX_KEY_SIZE, sizeof(hash), buffer, 0);
+			splinterdb_lookup(bm, bm_query, bm_result);
+			slice result_val;
+			splinterdb_lookup_result_value(bm_result, &result_val);
+			assert(slice_length(result_val) >= (minirun_rank + 1) * MAX_KEY_SIZE);
+			uint64_t orig_key;
+			memcpy(&orig_key, slice_data(result_val) + minirun_rank * MAX_KEY_SIZE, sizeof(uint64_t));
 			qf_adapt_using_ll_table(qf, orig_key, key, minirun_rank, QF_KEY_IS_HASH);
 			return -1;
 		}
