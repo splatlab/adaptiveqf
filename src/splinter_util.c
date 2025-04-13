@@ -63,6 +63,8 @@ int db_insert(splinterdb *database, const void *key_data, const size_t key_len, 
 	else return splinterdb_insert(database, key_slice, val_slice);
 }
 
+// Returns 0 if there's an error, 1 if inserted into empty minirun, 2 if inserted into existing minirun
+// If the minirun already existed, it will adapt the newly added fingerprint to prevent false negatives
 int qf_splinter_insert(QF *qf, splinterdb *db, uint64_t key, int count) {
 	qf_insert_result result;
 	int ret = qf_insert_using_ll_table(qf, key, count, &result, QF_NO_LOCK | QF_KEY_IS_HASH);
@@ -143,6 +145,7 @@ int qf_splinter_insert_split(QF *qf, splinterdb *db, splinterdb *bm, uint64_t ke
 	}
 }
 
+// Returns 1 if the key was found, 0 if not found, -1 if the key was found but adapted
 int qf_splinter_query_and_adapt(QF *qf, splinterdb *db, splinterdb_lookup_result *db_result, uint64_t key) {
 	uint64_t hash;
 	int minirun_rank = qf_query_using_ll_table(qf, key, &hash, QF_KEY_IS_HASH);
