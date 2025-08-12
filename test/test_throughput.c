@@ -79,7 +79,7 @@ int main(int argc, char **argv)
 	fclose(caida);
 
 	int murmur_seed = rand();
-	for (int i = 0; i < num_inserts; i++) {
+	for (int i = 0; i < num_queries; i++) {
 		query_set[i] %= (1ull << 24);
 		query_set[i] = MurmurHash64A(&query_set[i], sizeof(query_set[i]), murmur_seed);
 	}
