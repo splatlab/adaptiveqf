@@ -1551,6 +1551,70 @@ int qf_get_count_using_ll_table(const QF *qf, uint64_t key, uint64_t *ret_hash, 
 	return 0;
 }
 
+int qf_remove_using_ll_table(QF *qf, uint64_t key, uint64_t minirun_rank, uint8_t flags) {
+	uint64_t hash = key;
+	if (GET_KEY_HASH(flags) != QF_KEY_IS_HASH) {
+		if (qf->metadata->hash_mode == QF_HASH_DEFAULT) {
+			hash = MurmurHash64A(((void *)&key), sizeof(key), qf->metadata->seed);
+		}
+		else if (qf->metadata->hash_mode == QF_HASH_INVERTIBLE) {
+			hash = hash_64(key, -1ULL);
+		}
+	}
+
+	uint64_t hash_remainder = hash & BITMASK(qf->metadata->bits_per_slot);
+	uint64_t hash_bucket_index = (hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits);
+	if (!is_occupied(qf, hash_bucket_index)) return 0;
+
+	if (GET_NO_LOCK(flags) != QF_NO_LOCK) {
+		if (!qf_lock(qf, hash_bucket_index, /*small*/ true, flags))
+			return QF_COULDNT_LOCK;
+	}
+
+	uint64_t run_start = hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1;
+	if (run_start < hash_bucket_index) run_start = hash_bucket_index;
+	uint64_t current_index = run_start;
+	uint64_t curr_minirun_rank = 0;
+
+	uint64_t ext_info, count_info;
+	int ext_slots, count_slots;
+	do {
+		if (get_slot(qf, current_index) < hash_remainder) {
+			if (is_runend(qf, current_index)) break;
+			while (is_extension_or_counter(qf, ++current_index));
+		}
+		else if (get_slot(qf, current_index) == hash_remainder) {
+			get_slot_info(qf, current_index, &ext_info, &ext_slots, &count_info, &count_slots);
+
+			if (curr_minirun_rank == minirun_rank) {
+				// Remove the item from the filter
+				int only_item_in_run = (current_index == run_start && is_runend(qf, current_index + 1));
+				int ret_freed_slots = remove_replace_slots_and_shift_remainders_and_runends_and_offsets(qf, only_item_in_run, hash_bucket_index, current_index, 1 + ext_slots + count_slots);
+
+				qf->metadata->noccupied_slots -= ret_freed_slots;
+				qf->metadata->ndistinct_elts--;
+				qf->metadata->nelts -= count_info;
+
+				if (GET_NO_LOCK(flags) != QF_NO_LOCK) {
+					qf_unlock(qf, hash_bucket_index, /*small*/ true);
+				}
+				return ret_freed_slots;
+			}
+
+			if (is_runend(qf, current_index)) break;
+			current_index += 1 + ext_slots + count_slots;
+			curr_minirun_rank++;
+		}
+		else break;
+	} while (current_index < qf->metadata->xnslots);
+
+	if (GET_NO_LOCK(flags) != QF_NO_LOCK) {
+		qf_unlock(qf, hash_bucket_index, /*small*/ true);
+	}
+
+	return 0;
+}
+
 int insert_and_extend(QF *qf, uint64_t index, uint64_t key, uint64_t count, uint64_t other_key, uint64_t *ret_hash, uint64_t *ret_other_hash, uint8_t flags)
 {
 	if (GET_NO_LOCK(flags) != QF_NO_LOCK) {

@@ -168,6 +168,7 @@ extern "C" {
 	 */
 	int qf_remove(QF *qf, uint64_t key, uint64_t *ret_hash, int *ret_hash_len, uint8_t
 								flags);
+	int qf_remove_using_ll_table(QF *qf, uint64_t key, uint64_t minirun_rank, uint8_t flags);
 
 	/* Remove all instances of this key/value pair. */
 	int qf_delete_key_value(QF *qf, uint64_t key, uint64_t value, uint8_t flags);

@@ -38,6 +38,8 @@ void ll_free(ll_table *table);
 
 void ll_table_insert(ll_table *table, uint64_t family, uint64_t rank, uint64_t key);
 
+void ll_table_delete(ll_table *table, uint64_t family, uint64_t rank);
+
 uint64_t *ll_table_query(ll_table *table, uint64_t family, uint64_t rank);
 
 #endif

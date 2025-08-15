@@ -3,10 +3,10 @@
 #include <assert.h>
 
 void ll_table_init(ll_table *table, uint64_t size) {
-        table->size = size;
-        table->num_keys = 0;
-        table->num_families = 0;
-        table->buckets = calloc(size, sizeof(ll_list*));
+	table->size = size;
+	table->num_keys = 0;
+	table->num_families = 0;
+	table->buckets = calloc(size, sizeof(ll_list*));
 	table->seed = rand();
 }
 
@@ -89,6 +89,51 @@ void ll_table_insert(ll_table *table, uint64_t family, uint64_t rank, uint64_t k
 	assert(family_list->family == family);
 
 	table->num_keys++;
+}
+
+void ll_table_delete(ll_table *table, uint64_t family, uint64_t rank) {
+	uint64_t index = MurmurHash64A((void*)(&family), sizeof(uint64_t), table->seed) % table->size;
+
+	ll_list *list_ptr = table->buckets[index], *prev_list = NULL;
+	while (list_ptr != NULL) {
+		if (list_ptr->family == family) {
+			if (rank == 0) {
+				if (list_ptr->head != NULL) {
+					ll_node *temp = list_ptr->head;
+					list_ptr->head = list_ptr->head->next;
+					free(temp);
+					table->num_keys--;
+					if (list_ptr->head == NULL) {
+						if (prev_list == NULL) {
+							table->buckets[index] = list_ptr->next;
+						}
+						else {
+							prev_list->next = list_ptr->next;
+						}
+						free(list_ptr);
+						table->num_families--;
+					}
+				}
+			}
+			else {
+				ll_node *ptr = list_ptr->head, *prev = NULL;
+				for (int i = 0; i < rank; i++) {
+					if (ptr == NULL) return; // rank out of bounds
+					prev = ptr;
+					ptr = ptr->next;
+				}
+				if (ptr != NULL) {
+					prev->next = ptr->next;
+					free(ptr);
+					table->num_keys--;
+				}
+			}
+			return;
+		}
+		prev_list = list_ptr;
+		list_ptr = list_ptr->next;
+	}
+	return; // family not found
 }
 
 uint64_t *ll_table_query(ll_table *table, uint64_t family, uint64_t rank) {
