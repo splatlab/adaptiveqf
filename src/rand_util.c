@@ -5,6 +5,10 @@ uint64_t rand_uniform(uint64_t max) {
 	uint64_t a = rand();
 	uint64_t b = rand();
 	a |= (b << 31);
+	if (max < (1ULL << 62))
+		return a % max;
+	uint64_t c = rand();
+	a |= (c << 62);
 	return a % max;
 }
 
