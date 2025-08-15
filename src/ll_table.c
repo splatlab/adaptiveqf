@@ -152,6 +152,7 @@ uint64_t *ll_table_query(ll_table *table, uint64_t family, uint64_t rank) {
 			}
 			else return NULL;
 		}
+		list_ptr = list_ptr->next;
 	}
 	return NULL;
 }
