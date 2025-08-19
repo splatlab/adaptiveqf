@@ -11,7 +11,7 @@ void ll_table_init(ll_table *table, uint64_t size) {
 }
 
 void ll_free(ll_table *table) {
-	for (int i = 0; i < table->size; i++) {
+	for (uint64_t i = 0; i < table->size; i++) {
 		ll_list *list_ptr = table->buckets[i], *list_next = NULL;
 		while (list_ptr != NULL) {
 			list_next = list_ptr->next;
@@ -39,12 +39,14 @@ void ll_table_insert(ll_table *table, uint64_t family, uint64_t rank, uint64_t k
 		family_list->family = family;
 		family_list->head = NULL;
 		family_list->next = NULL;
+		table->num_families++;
 	}
 	else if (table->buckets[index]->family >= family) {
 		if (table->buckets[index]->family == family) family_list = table->buckets[index];
 		else {
 			family_list = malloc(sizeof(ll_list));
 			family_list->family = family;
+			family_list->head = NULL;
 			family_list->next = table->buckets[index];
 			table->buckets[index] = family_list;
 			table->num_families++;
@@ -58,6 +60,7 @@ void ll_table_insert(ll_table *table, uint64_t family, uint64_t rank, uint64_t k
 				else {
 					family_list = malloc(sizeof(ll_list));
 					family_list->family = family;
+					family_list->head = NULL;
 					family_list->next = ptr->next;
 					ptr->next = family_list;
 					table->num_families++;
@@ -69,6 +72,8 @@ void ll_table_insert(ll_table *table, uint64_t family, uint64_t rank, uint64_t k
 		if (family_list == NULL) {
 			family_list = malloc(sizeof(ll_list));
 			family_list->family = family;
+			family_list->head = NULL;
+			family_list->next = NULL;
 			ptr->next = family_list;
 			table->num_families++;
 		}
@@ -82,7 +87,11 @@ void ll_table_insert(ll_table *table, uint64_t family, uint64_t rank, uint64_t k
 	}
 	else {
 		ll_node *ptr = family_list->head;
-		for (int i = 1; i < rank; i++) ptr = ptr->next;
+		if (ptr == NULL) return; // rank out of bounds
+		for (int i = 1; i < rank; i++) {
+			if (ptr->next == NULL) return; // rank out of bounds
+			ptr = ptr->next;
+		}
 		new_node->next = ptr->next;
 		ptr->next = new_node;
 	}
@@ -91,11 +100,17 @@ void ll_table_insert(ll_table *table, uint64_t family, uint64_t rank, uint64_t k
 	table->num_keys++;
 }
 
+void llbp() {
+
+}
+
 void ll_table_delete(ll_table *table, uint64_t family, uint64_t rank) {
 	uint64_t index = MurmurHash64A((void*)(&family), sizeof(uint64_t), table->seed) % table->size;
+	if (index == 79) llbp();
 
 	ll_list *list_ptr = table->buckets[index], *prev_list = NULL;
 	while (list_ptr != NULL) {
+		// Find the list corresponding to this minirun
 		if (list_ptr->family == family) {
 			if (rank == 0) {
 				if (list_ptr->head != NULL) {
@@ -145,9 +160,11 @@ uint64_t *ll_table_query(ll_table *table, uint64_t family, uint64_t rank) {
 			if (list_ptr->family == family) {
 				ll_node *ptr = list_ptr->head;
 				while (rank > 0) {
+					if (ptr == NULL) return NULL; // rank out of bounds
 					ptr = ptr->next;
 					rank--;
 				}
+				if (ptr == NULL) return NULL; // rank out of bounds
 				return &(ptr->key);
 			}
 			else return NULL;

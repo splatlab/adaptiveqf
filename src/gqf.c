@@ -1112,27 +1112,41 @@ int snapshot(const QF *qf) {
         for (i = 0; i * 64 < qf->metadata->xnslots; i++) {
                 uint64_t occupied = get_block(qf, i)->occupieds[0];
                 for (j = 0; j < 64; j++) {
-                        buffer1[63 - j] = '0' + occupied % 2;
+                        buffer1[j] = '0' + occupied % 2;
                         occupied >>= 1;
                 }
                 sprintf(buffer2, "%d\t%s\n", i, buffer1);
                 //printf("%s", buffer2);
                 fputs(buffer2, fp);
+
                 uint64_t runend = get_block(qf, i)->runends[0];
                 for (j = 0; j < 64; j++) {
-                        buffer1[63 - j] = '0' + runend % 2;
+                        buffer1[j] = '0' + runend % 2;
                         runend >>= 1;
                 }
                 sprintf(buffer2, "%d\t%s\n", get_block(qf, i)->offset, buffer1);
                 //printf("%s", buffer2);
                 fputs(buffer2, fp);
+
                 uint64_t extension = get_block(qf, i)->extensions[0];
                 for (j = 0; j < 64; j++) {
-                        buffer1[63 - j] = '0' + extension % 2;
+                        buffer1[j] = '0' + extension % 2;
                         extension >>= 1;
                 }
                 sprintf(buffer2, "\t%s\n", buffer1);
                 fputs(buffer2, fp);
+
+				for (j = 0; j < QF_SLOTS_PER_BLOCK; j++) {
+					if (QF_SLOTS_PER_BLOCK * i + j >= qf->metadata->xnslots) {
+						fputs("\n", fp);
+						break;
+					}
+					sprintf(buffer2, "\t%ld", get_slot(qf, QF_SLOTS_PER_BLOCK * i + j));
+					fputs(buffer2, fp);
+					if ((j + 1) % 16 == 0 || j == QF_SLOTS_PER_BLOCK - 1) {
+						fputs("\n", fp);
+					}
+				}
         }
         fclose(fp);
         return 1;
@@ -1327,7 +1341,7 @@ static inline int insert_using_ll_table(QF *qf, qf_insert_result *result, uint64
 #endif
 
 		if (count > 1) {
-			insert_and_extend(qf, hash_bucket_index, result->hash, count - 1, result->hash, result->hash, result->hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
+			insert_and_extend(qf, hash_bucket_index, result->hash, count - 1, result->hash, &result->hash, &result->hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
 		}
 		//printf("inserted in slot %lu - empty slot\n", hash_bucket_index);
 	} else { /* Non-empty slot */
@@ -1349,7 +1363,7 @@ static inline int insert_using_ll_table(QF *qf, qf_insert_result *result, uint64
 			modify_metadata(&qf->runtimedata->pc_nelts, count);
 #endif
 
-			if (count > 1) insert_and_extend(qf, hash_bucket_index, result->hash, count - 1, result->hash, result->hash, result->hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash is a placeholders
+			if (count > 1) insert_and_extend(qf, hash_bucket_index, result->hash, count - 1, result->hash, &result->hash, &result->hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash is a placeholders
 		} else { /* Non-empty bucket */
 
 			/* uint64_t current_remainder, current_count, current_end; */
@@ -1405,7 +1419,7 @@ static inline int insert_using_ll_table(QF *qf, qf_insert_result *result, uint64
 			modify_metadata(&qf->runtimedata->pc_nelts, count);
 #endif
 
-			if (count > 1) insert_and_extend(qf, insert_index, result->hash, count - 1, result->hash, result->hash, result->hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
+			if (count > 1) insert_and_extend(qf, insert_index, result->hash, count - 1, result->hash, &result->hash, &result->hash, QF_KEY_IS_HASH | QF_NO_LOCK); // ret_hash and ret_hash_len are placeholders
 		}
 	}
 
@@ -1588,7 +1602,7 @@ int qf_remove_using_ll_table(QF *qf, uint64_t key, uint64_t minirun_rank, uint8_
 
 			if (curr_minirun_rank == minirun_rank) {
 				// Remove the item from the filter
-				int only_item_in_run = (current_index == run_start && is_runend(qf, current_index + 1));
+				int only_item_in_run = (current_index == run_start && is_runend(qf, current_index));
 				int ret_freed_slots = remove_replace_slots_and_shift_remainders_and_runends_and_offsets(qf, only_item_in_run, hash_bucket_index, current_index, 1 + ext_slots + count_slots);
 
 				qf->metadata->noccupied_slots -= ret_freed_slots;
