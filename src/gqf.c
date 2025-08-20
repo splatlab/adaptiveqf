@@ -1152,6 +1152,64 @@ int snapshot(const QF *qf) {
         return 1;
 }
 
+static int verify_ll_table(QF *qf, ll_table *table, uint8_t flags, int early_terminate) {
+	if (!qf || !table) return 1;
+	if (qf->metadata->ndistinct_elts != table->num_keys) return 1;
+	int anomaly_detected = 0;
+
+	// Verify that every item in the linked list table is in the QF
+	for (uint64_t i = 0; i < table->size; i++) {
+		ll_list *list_ptr = table->buckets[i];
+		while (list_ptr) {
+			ll_node *node_ptr = list_ptr->head;
+			while (node_ptr) {
+				uint64_t key = node_ptr->key;
+				uint64_t ret_hash;
+				int ret = qf_query_using_ll_table(qf, key, &ret_hash, flags);
+				if (ret < 0 || ret_hash != (key & BITMASK(qf->metadata->quotient_bits + qf->metadata->bits_per_slot))) {
+					if (ret < 0) fprintf(stderr, "Verification failed: key %lu in ll_table bucket %lu with minirun ID %lu not found in QF\n", key, i, list_ptr->family);
+					else fprintf(stderr, "Verification failed: key %lu in ll_table bucket %lu with minirun ID %lu does not match entry found in QF\n", key, i, list_ptr->family);
+					if (early_terminate) return 2;
+					anomaly_detected = 2;
+				}
+				node_ptr = node_ptr->next;
+			}
+			list_ptr = list_ptr->next;
+		}
+	}
+
+	// Verify that every item in the QF is in the linked list table
+	for (uint64_t hash_bucket_index = 0; hash_bucket_index < (1ULL << qf->metadata->quotient_bits); hash_bucket_index++) {
+		if (!is_occupied(qf, hash_bucket_index)) continue;
+		uint64_t runstart_index = (hash_bucket_index == 0 ? 0 : run_end(qf, hash_bucket_index - 1) + 1);
+		uint64_t current_index = runstart_index;
+		while (true) {
+			uint64_t hash_remainder = get_slot(qf, current_index);
+			uint64_t minirun_id = (hash_bucket_index << qf->metadata->bits_per_slot) | hash_remainder;
+			uint64_t *ll_result = ll_table_query(table, minirun_id, 0);
+			if (ll_result == NULL) {
+				fprintf(stderr, "Verification failed: fingerprint %lu in bucket %lu with remainder %lu not found in ll_table\n", minirun_id, hash_bucket_index, hash_remainder);
+				if (early_terminate) return 3;
+				anomaly_detected = 3;
+			}
+			uint64_t hash = *ll_result;
+			if (GET_KEY_HASH(flags) != QF_KEY_IS_HASH) {
+				if (qf->metadata->hash_mode == QF_HASH_DEFAULT)
+					hash = MurmurHash64A((void*)ll_result, sizeof(uint64_t), qf->metadata->seed);
+				else if (qf->metadata->hash_mode == QF_HASH_INVERTIBLE)
+					hash = hash_64(*ll_result, -1ULL);
+			}
+			if (hash & BITMASK(qf->metadata->bits_per_slot) != hash_remainder || (hash >> qf->metadata->bits_per_slot) & BITMASK(qf->metadata->quotient_bits) != hash_bucket_index) {
+				fprintf(stderr, "Verification failed: fingerprint %lu in bucket %lu with remainder %lu does not match entry found in ll_table\n", minirun_id, hash_bucket_index, hash_remainder);
+				if (early_terminate) return 3;
+				anomaly_detected = 3;
+			}
+		}
+	}
+
+	return anomaly_detected;
+}
+
 int tight_inserts = 0;
 static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_index, uint64_t *ret_hash, int *ret_hash_len, uint8_t runtime_lock) // copy of the insert function for modification
 // hash is 64 hashed key bits concatenated with 64 value bits

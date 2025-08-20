@@ -285,7 +285,7 @@ int main(int argc, char **argv) {
                 //     breakpoint();
                 // }
 
-                // fprintf(stderr, "\rChurn delete %zu/%zu", j + 1, updates_per_churn);
+                fprintf(stderr, "\rChurn delete %zu/%zu", j + 1, updates_per_churn);
 
                 // Find a random key to delete
                 size_t delete_index = rand() % num_slots;
@@ -294,11 +294,11 @@ int main(int argc, char **argv) {
                 }
                 uint64_t delete_key = inv_map.buckets[delete_index]->head->key;
                 
-                // if (i == 7 && j == 6) breakpoint();
-                // if (i == 7 && j == 49) {
-                //     printf("Key: %lu\n", delete_key);
-                //     breakpoint();
-                // }
+                if (i == 7 && j == 6) breakpoint();
+                if (i == 7 && j == 49) {
+                    printf("Key: %lu\n", delete_key);
+                    breakpoint();
+                }
 
                 minirun_rank = qf_query_using_ll_table(&qf, delete_key, &ret_hash, QF_KEY_IS_HASH);
                 try_assert(minirun_rank >= 0, "Item in inverse map not found in QF");
@@ -310,7 +310,7 @@ int main(int argc, char **argv) {
                 
                 ll_table_delete(&inv_map, ret_hash & ((1ULL << (qbits + rbits)) - 1), minirun_rank);
 
-                // try_assert(!inserted_test_key || (qf_query_using_ll_table(&qf, 16374950167423305250ULL, &ret_hash, QF_KEY_IS_HASH) >= 0), "Test key lost");
+                try_assert(!inserted_test_key || (qf_query_using_ll_table(&qf, 16374950167423305250ULL, &ret_hash, QF_KEY_IS_HASH) >= 0), "Test key lost");
 
                 // for (uint64_t k = 0; k < num_slots; k++) {
                 //     fprintf(stderr, "\rTesting correctness of inverse map for slot %zu... ", k);
@@ -331,11 +331,11 @@ int main(int argc, char **argv) {
             if (seeded) for (size_t j = 0; j < updates_per_churn; j++) insert_set[j] = rand_uniform(-1ULL);
             else RAND_bytes((unsigned char*)insert_set, updates_per_churn * sizeof(uint64_t));
             for (size_t j = 0; j < updates_per_churn; j++) {
-                // if (insert_set[j] == 16374950167423305250ULL) {
-                //     printf("Found key\n");
-                //     inserted_test_key = 1;
-                //     breakpoint();
-                // }
+                if (insert_set[j] == 16374950167423305250ULL) {
+                    printf("Found key\n");
+                    inserted_test_key = 1;
+                    breakpoint();
+                }
 
                 qf_insert_result insert_result;
                 int ret = qf_insert_using_ll_table(&qf, insert_set[j], 1, &insert_result, QF_KEY_IS_HASH | QF_NO_LOCK);
@@ -345,7 +345,7 @@ int main(int argc, char **argv) {
                 }
                 ll_table_insert(&inv_map, insert_result.minirun_id, 0, insert_set[j]);
 
-                // try_assert(!inserted_test_key || (qf_query_using_ll_table(&qf, 16374950167423305250ULL, &ret_hash, QF_KEY_IS_HASH) >= 0), "Test key lost");
+                try_assert(!inserted_test_key || (qf_query_using_ll_table(&qf, 16374950167423305250ULL, &ret_hash, QF_KEY_IS_HASH) >= 0), "Test key lost");
 
                 // for (uint64_t k = 0; k < num_slots; k++) {
                 //     fprintf(stderr, "\rTesting correctness of inverse map for slot %zu after insert %zu... ", k, j);

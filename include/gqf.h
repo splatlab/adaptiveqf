@@ -345,6 +345,7 @@ extern "C" {
 	void stop_recording();
 	int record(const QF *qf, char *operation, uint64_t hash, uint64_t recorded_block);
 	int snapshot(const QF *qf);
+	static int verify_ll_table(QF *qf, ll_table *table, uint8_t flags, int early_terminate);
 
 	bool qf_lock(QF *qf, uint64_t hash_bucket_index, bool small, uint8_t
 										runtime_lock);
