@@ -50,9 +50,9 @@ LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) \
 # Core source files
 CORE_OBJS = \
 	$(OBJDIR)/gqf.o \
-	$(OBJDIR)/gqf_file.o \
 	$(OBJDIR)/hashutil.o \
-	$(OBJDIR)/partitioned_counter.o
+	$(OBJDIR)/partitioned_counter.o \
+	$(OBJDIR)/aqf.o
 
 # Reverse map source files
 RM_OBJS = \
@@ -71,14 +71,14 @@ libqf.a: $(CORE_OBJS) $(RM_OBJS)
 $(OBJDIR)/gqf.o: src/gqf.c include/gqf.h include/gqf_int.h reverse_maps/ll_table/ll_table.h | $(OBJDIR)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
-$(OBJDIR)/gqf_file.o: src/gqf_file.c include/gqf_file.h | $(OBJDIR)
-	$(CC) $(CXXFLAGS) -c $< -o $@
-
 $(OBJDIR)/hashutil.o: src/hashutil.c include/hashutil.h | $(OBJDIR)
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
 $(OBJDIR)/partitioned_counter.o: include/partitioned_counter.h | $(OBJDIR)
 	$(CC) $(CXXFLAGS) -c src/partitioned_counter.c -o $@
+
+$(OBJDIR)/aqf.o: src/aqf.c include/aqf.h include/gqf.h include/gqf_int.h include/hashutil.h | $(OBJDIR)
+	$(CC) $(CXXFLAGS) -c $< -o $@
 
 # Reverse map compilation
 $(OBJDIR)/ll_table.o: reverse_maps/ll_table/ll_table.c reverse_maps/ll_table/ll_table.h | $(OBJDIR)

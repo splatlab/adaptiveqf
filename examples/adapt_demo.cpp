@@ -4,12 +4,7 @@
 #include <unordered_set>
 #include <vector>
 
-extern "C" {
-#include <gqf.h>
-}
-
-#include "qf_filter.hpp"
-#include "adaptiveqf.hpp"
+#include "aqf_wrapper.hpp"
 #include "mock_db.hpp"
 
 int main() {
