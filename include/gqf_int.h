@@ -1,6 +1,13 @@
 #ifndef _GQF_INT_H_
 #define _GQF_INT_H_
 
+// [TODO-P4] This header exposes all internal structs publicly.
+// Goal: encapsulate qfblock internals — provide accessor functions
+// instead of allowing direct struct manipulation throughout the codebase.
+// [TODO-P4] Move qfmetadata and qfruntime into .c files (private).
+// [TODO-P4] Consider extracting to: qf_types.h (public types),
+//   qf_block.h (block layout), qf_runtime.h (runtime metadata).
+
 #include <inttypes.h>
 #include <stdbool.h>
 

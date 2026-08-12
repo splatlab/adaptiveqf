@@ -1,17 +1,16 @@
-CXXTARGETS=splinger_false_negative unit_test test_ext_throughput test_ext_inc_throughput test_zipf_throughput test_ext_churn taf
-SPLTARGETS=test_splinter_ops test_splinter_inserts test_splinter_inserts_2 test_splinter_throughput test_splinter_zipfian_histogram test_splinter_adversarial
-# test_progress
+# [TODO-P5] This Makefile is being cleaned up. Current: ~57 targets → target: 4-5.
+# [TODO-P5] Migrate to sponge/build/ output.
+# [TODO-P2] Add bench_ filters and workload_gen targets when ready.
+# See adaptiveqf/TODO.md Phase 5 for the full plan.
 
 ifndef D
 	DEBUG=
 	OPT=-O3 -DNDEBUG
 	SPLINTERPATH=external/splinterdb/build/release/lib
-	#SPLINTERPATH=external/splinterdb/btree
 else
 	DEBUG=-g
 	OPT=-O0
 	SPLINTERPATH=external/splinterdb/build/debug/lib
-	#SPLINTERPATH=external/splinterdb/btree
 endif
 
 ifdef NH
@@ -21,229 +20,78 @@ else
 endif
 
 ifdef P
-	PROFILE=-pg -no-pie # for bug in gprof.
+	PROFILE=-pg -no-pie
 endif
 
 LOC_INCLUDE=include
 LOC_SRC=src
-LOC_TEST=test
 OBJDIR=obj
 
 CC = gcc -std=gnu11
-CXX = g++ -std=c++11
-LD= gcc -std=gnu11
+CXX = g++ -std=c++17
+LD = gcc -std=gnu11
 
-CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -m64 -I. -Iinclude -Iexternal/splinterdb/include -DSPLINTERDB_PLATFORM_DIR=platform_linux -DSKIP_BOOL_DEF -D_GNU_SOURCE
+CXXFLAGS = -Wall $(DEBUG) $(PROFILE) $(OPT) $(ARCH) -m64 \
+	-I. \
+	-Iinclude \
+	-Ireverse_maps/ll_table \
+	-Ireverse_maps/splinterdb \
+	-Ireverse_maps/mock \
+	-Iexternal \
+	-Iexternal/splinterdb/include \
+	-DSPLINTERDB_PLATFORM_DIR=platform_linux \
+	-DSKIP_BOOL_DEF \
+	-D_GNU_SOURCE
 
-LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) -lpthread -lssl -lcrypto -lm -L$(SPLINTERPATH) -lsplinterdb -Wl,-rpath=$(SPLINTERPATH)
-#LDFLAGS += -L/usr/lib/ -lstxxl
+LDFLAGS = $(DEBUG) $(PROFILE) $(OPT) \
+	-lpthread -lssl -lcrypto -lm \
+	-L$(SPLINTERPATH) -lsplinterdb -Wl,-rpath=$(SPLINTERPATH)
 
-#
-# declaration of dependencies
-#
+# Core source files
+CORE_OBJS = \
+	$(OBJDIR)/gqf.o \
+	$(OBJDIR)/gqf_file.o \
+	$(OBJDIR)/hashutil.o \
+	$(OBJDIR)/partitioned_counter.o
 
-all: $(CTARGETS) #$(SPLTARGETS) #$(CXXTARGETS)
+# Reverse map source files
+RM_OBJS = \
+	$(OBJDIR)/ll_table.o
 
-# dependencies between programs and .o files
+ifneq ($(wildcard $(SPLINTERPATH)/libsplinterdb.a),)
+RM_OBJS += $(OBJDIR)/splinter_util.o
+endif
 
-test_unit:								$(OBJDIR)/test_unit.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
+all: libqf.a
 
-test_splinter_false_negative:			$(OBJDIR)/test_splinter_false_negative.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/splinter_util.o $(OBJDIR)/test_driver.o \
-										$(OBJDIR)/partitioned_counter.o $(OBJDIR)/ll_table.o $(OBJDIR)/rand_util.o
+libqf.a: $(CORE_OBJS) $(RM_OBJS)
+	ar rcs $@ $^
 
-test_throughput:						$(OBJDIR)/test_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/splinter_util.o $(OBJDIR)/test_driver.o \
-										$(OBJDIR)/partitioned_counter.o $(OBJDIR)/ll_table.o $(OBJDIR)/rand_util.o
+# Core source compilation
+$(OBJDIR)/gqf.o: src/gqf.c include/gqf.h include/gqf_int.h reverse_maps/ll_table/ll_table.h | $(OBJDIR)
+	$(CC) $(CXXFLAGS) -c $< -o $@
 
-unit_test:						$(OBJDIR)/unit_test.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/splinter_util.o \
-										$(OBJDIR)/partitioned_counter.o $(OBJDIR)/ll_table.o $(OBJDIR)/rand_util.o
+$(OBJDIR)/gqf_file.o: src/gqf_file.c include/gqf_file.h | $(OBJDIR)
+	$(CC) $(CXXFLAGS) -c $< -o $@
 
-test_split_throughput:						$(OBJDIR)/test_split_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/splinter_util.o $(OBJDIR)/test_driver.o \
-										$(OBJDIR)/partitioned_counter.o $(OBJDIR)/ll_table.o $(OBJDIR)/rand_util.o
+$(OBJDIR)/hashutil.o: src/hashutil.c include/hashutil.h | $(OBJDIR)
+	$(CC) $(CXXFLAGS) -c $< -o $@
 
-test_adversarial:						$(OBJDIR)/test_adversarial.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/splinter_util.o $(OBJDIR)/test_driver.o \
-										$(OBJDIR)/partitioned_counter.o $(OBJDIR)/ll_table.o $(OBJDIR)/rand_util.o
+$(OBJDIR)/partitioned_counter.o: include/partitioned_counter.h | $(OBJDIR)
+	$(CC) $(CXXFLAGS) -c src/partitioned_counter.c -o $@
 
-test_micro:								$(OBJDIR)/test_micro.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/splinter_util.o $(OBJDIR)/test_driver.o \
-										$(OBJDIR)/partitioned_counter.o $(OBJDIR)/ll_table.o $(OBJDIR)/rand_util.o
+# Reverse map compilation
+$(OBJDIR)/ll_table.o: reverse_maps/ll_table/ll_table.c reverse_maps/ll_table/ll_table.h | $(OBJDIR)
+	$(CC) $(CXXFLAGS) -c $< -o $@
 
-test_splinter_parallel:						$(OBJDIR)/test_splinter_parallel.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/splinter_util.o $(OBJDIR)/test_driver.o \
-										$(OBJDIR)/partitioned_counter.o $(OBJDIR)/ll_table.o $(OBJDIR)/rand_util.o
-
-test_parallel:						$(OBJDIR)/test_parallel.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/splinter_util.o $(OBJDIR)/test_driver.o \
-										$(OBJDIR)/partitioned_counter.o $(OBJDIR)/ll_table.o $(OBJDIR)/rand_util.o
-
-test_progress:								$(OBJDIR)/test_progress.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_throughput_old:							$(OBJDIR)/test_throughput_old.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_micro_throughput:							$(OBJDIR)/test_micro_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_micro_write:							$(OBJDIR)/test_micro_write.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_micro_read:							$(OBJDIR)/test_micro_read.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_lltable_throughput:							$(OBJDIR)/test_lltable_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_fill_varied_throughput:						$(OBJDIR)/test_fill_varied_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_near_full:								$(OBJDIR)/test_near_full.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_deletions:								$(OBJDIR)/test_deletions.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_merge:								$(OBJDIR)/test_merge.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_bulk:								$(OBJDIR)/test_bulk.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_whitelist:								$(OBJDIR)/test_whitelist.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_hash_accesses:							$(OBJDIR)/test_hash_accesses.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_resize:							$(OBJDIR)/test_resize.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_threadsafe:							$(OBJDIR)/test_threadsafe.o $(OBJDIR)/gqf.o \
-										$(OBJDIR)/gqf_file.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_pc:								$(OBJDIR)/test_partitioned_counter.o $(OBJDIR)/gqf.o \
-										$(OBJDIR)/gqf_file.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-bm:										$(OBJDIR)/bm.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_ext_throughput:							$(OBJDIR)/test_ext_throughput.o $(OBJDIR)/gqf.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_ext_inc_throughput:							$(OBJDIR)/test_ext_inc_throughput.o $(OBJDIR)/gqf.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_zipf_throughput:							$(OBJDIR)/test_zipf_throughput.o $(OBJDIR)/gqf.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_ext_churn:							$(OBJDIR)/test_ext_churn.o $(OBJDIR)/gqf.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-taf:									$(OBJDIR)/taf.o $(OBJDIR)/hashutil.o
-
-test_splinter_ops:							$(OBJDIR)/test_splinter_ops.o $(OBJDIR)/gqf.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_splinter_inserts:							$(OBJDIR)/test_splinter_inserts.o $(OBJDIR)/gqf.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_splinter_inserts_2:							$(OBJDIR)/test_splinter_inserts_2.o $(OBJDIR)/gqf.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_splinter_throughput:							$(OBJDIR)/test_splinter_throughput.o $(OBJDIR)/gqf.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_splinter_zipfian_histogram:							$(OBJDIR)/test_splinter_zipfian_histogram.o $(OBJDIR)/gqf.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_splinter_adversarial:							$(OBJDIR)/test_splinter_adversarial.o $(OBJDIR)/gqf.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o \
-										$(OBJDIR)/partitioned_counter.o
-
-test_splinter_lltable_throughput:		$(OBJDIR)/test_splinter_lltable_throughput.o $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o \
-										$(OBJDIR)/zipf.o $(OBJDIR)/hashutil.o $(OBJDIR)/ll_table.o $(OBJDIR)/splinter_util.o \
-										$(OBJDIR)/partitioned_counter.o $(OBJDIR)/rand_util.o
-
-# dependencies between .o files and .h files
-
-$(OBJDIR)/test.o: 						$(LOC_INCLUDE)/gqf.h $(LOC_INCLUDE)/gqf_file.h \
-															$(LOC_INCLUDE)/hashutil.h \
-															$(LOC_INCLUDE)/partitioned_counter.h
-
-$(OBJDIR)/test_threadsafe.o: 	$(LOC_INCLUDE)/gqf.h $(LOC_INCLUDE)/gqf_file.h \
-															$(LOC_INCLUDE)/hashutil.h \
-															$(LOC_INCLUDE)/partitioned_counter.h
-
-$(OBJDIR)/bm.o:								$(LOC_INCLUDE)/gqf_wrapper.h \
-															$(LOC_INCLUDE)/partitioned_counter.h
-
-
-# dependencies between .o files and .cc (or .c) files
-
-$(OBJDIR)/gqf.o:						$(LOC_SRC)/gqf.c $(LOC_INCLUDE)/gqf.h
-$(OBJDIR)/gqf_file.o:					$(LOC_SRC)/gqf_file.c $(LOC_INCLUDE)/gqf_file.h
-$(OBJDIR)/hashutil.o:					$(LOC_SRC)/hashutil.c $(LOC_INCLUDE)/hashutil.h
-$(OBJDIR)/partitioned_counter.o:		$(LOC_INCLUDE)/partitioned_counter.h
-$(OBJDIR)/ll_table.o:					$(LOC_SRC)/ll_table.c $(LOC_INCLUDE)/ll_table.h
-$(OBJDIR)/splinter_util.o:				$(LOC_SRC)/splinter_util.c $(LOC_INCLUDE)/splinter_util.h# $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o
-$(OBJDIR)/test_driver.o:				$(LOC_SRC)/test_driver.c $(LOC_INCLUDE)/test_driver.h# $(OBJDIR)/gqf.o $(OBJDIR)/gqf_file.o $(OBJDIR)/splinter_util.o
-
-#
-# generic build rules
-#
-
-$(CTARGETS):
-	$(LD) $^ -o $@ $(LDFLAGS)
-
-$(SPLTARGETS):
-	$(LD) $^ -o $@ $(LDFLAGS)
-
-$(CXXTARGETS):
-	$(CXX) $^ -o $@ $(CXXFLAGS)
-
-$(OBJDIR)/%.o: $(LOC_SRC)/%.cc | $(OBJDIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDE) $< -c -o $@
-
-$(OBJDIR)/%.o: $(LOC_SRC)/%.c | $(OBJDIR)
-	$(CC) $(CXXFLAGS) $(INCLUDE) $< -c -o $@
-
-$(OBJDIR)/%.o: $(LOC_TEST)/%.c | $(OBJDIR)
-	$(CC) $(CXXFLAGS) $(INCLUDE) $< -c -o $@
+ifneq ($(wildcard $(SPLINTERPATH)/libsplinterdb.a),)
+$(OBJDIR)/splinter_util.o: reverse_maps/splinterdb/splinter_util.c reverse_maps/splinterdb/splinter_util.h | $(OBJDIR)
+	$(CC) $(CXXFLAGS) -c $< -o $@
+endif
 
 $(OBJDIR):
 	@mkdir -p $(OBJDIR)
 
+.PHONY: clean
 clean:
-	rm -rf $(OBJDIR) $(CTARGETS) $(CXXTARGETS) $(SPLTARGETS) core
+	rm -rf $(OBJDIR) libqf.a

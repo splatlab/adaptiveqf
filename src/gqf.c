@@ -1,3 +1,11 @@
+// [TODO-P4] This file is the monolithic 3081-line core. Extract modules:
+//   qf_lock.c (lines 54-260), qf_bitutil.c (263-540), qf_slot.c (540-827, 968-987),
+//   qf_debug.c (764-968), qf_record.c (1021-1140), qf_insert.c (1141-1418, 1554-2090),
+//   qf_query.c (1419-1553, 2091-2139), qf_adapt.c (2140-2283),
+//   qf_metadata.c (1694-1936, 2285-2340), qf_resize.c (1937-2090),
+//   qf_iter.c (2342-2556), qf_merge.c (2557-2966), qf_misc.c (2967-3081).
+//   See adaptiveqf/TODO.md Phase 4 for the full plan.
+
 #include <stdlib.h>
 #include <assert.h>
 #include <string.h>
@@ -51,6 +59,7 @@
 #define DEBUG_DUMP(qf) \
 	do { if (PRINT_DEBUG) qf_dump_metadata(qf); } while (0)
 
+// [TODO-P4] Extract to qf_lock.c — lock/unlock/spin operations
 void bp1(const QF *qf, uint64_t hash_bucket_index, uint64_t hash_bucket_offset, uint64_t hash_remainder) {
 	return;
 }
@@ -254,6 +263,7 @@ void qf_unlock(QF *qf, uint64_t hash_bucket_index, bool small)
 	/*return;*/
 /*}*/
 
+// [TODO-P4] Extract to qf_bitutil.c — popcnt, bitselect, bitrank, _select64
 static void modify_metadata(pc_t *metadata, int cnt)
 {
 	pc_add(metadata, cnt);
@@ -579,6 +589,7 @@ static inline void set_slot(const QF *qf, uint64_t index, uint64_t value)
 
 #endif
 
+// [TODO-P4] Extract to qf_slot.c — get_slot, set_slot, run_end, shift_remainders, is_empty
 static inline uint64_t run_end(const QF *qf, uint64_t hash_bucket_index);
 
 static inline uint64_t block_offset(const QF *qf, uint64_t blockidx)
@@ -761,6 +772,7 @@ static inline void shift_remainders(QF *qf, const uint64_t start_index, const ui
 
 #endif
 
+// [TODO-P4] Extract to qf_debug.c — dump functions
 static inline void qf_dump_block(const QF *qf, uint64_t i)
 {
 	uint64_t j;
@@ -976,6 +988,11 @@ static inline uint64_t next_slot(QF *qf, uint64_t current) // EDIT: change schem
 	return current;
 }
 
+// [TODO-P4] These functions (get_slot_info, adapt) have TWO definitions in this
+//   file: one earlier (forward-declared here) and one later (at ~line 2158).
+//   The second definition is the "real" one. The first declaration+definition
+//   block should be removed once the code is verified to work without it.
+//   This is likely a merge artifact from incremental development.
 static inline int get_slot_info(const QF *qf, uint64_t index, uint64_t *ext, int *ext_slots, uint64_t *count, int *count_slots);
 //int qf_adapt(QF *qf, uint64_t index, uint64_t hash, uint64_t other_hash, uint8_t flags);
 static inline int adapt(QF *qf, uint64_t index, uint64_t hash_bucket_index, uint64_t hash, uint64_t other_hash, uint64_t *ret_hash);
@@ -1017,6 +1034,7 @@ static inline int insert_one_slot(QF *qf, uint64_t target_index, uint64_t insert
 	return 1;
 }
 
+// [TODO-P4] Extract to qf_record.c — recording/snapshot functions
 FILE *recording = NULL;
 void start_recording() {
 	if (recording) stop_recording();
@@ -1138,6 +1156,7 @@ int snapshot(const QF *qf) {
         return 1;
 }
 
+// [TODO-P4] Extract to qf_insert.c — internal insert functions
 int tight_inserts = 0;
 static inline int insert(QF *qf, uint64_t hash, uint64_t count, uint64_t *ret_index, uint64_t *ret_hash, int *ret_hash_len, uint8_t runtime_lock) // copy of the insert function for modification
 // hash is 64 hashed key bits concatenated with 64 value bits
@@ -1416,6 +1435,7 @@ static inline int insert_using_ll_table(QF *qf, qf_insert_result *result, uint64
 	return 0;
 }
 
+// [TODO-P4] Extract to qf_insert.c — qf_insert_using_ll_table (public API)
 int qf_insert_using_ll_table(QF *qf, uint64_t key, uint64_t count, qf_insert_result *result, uint8_t flags)
 {
 	// We fill up the CQF up to 95% load factor.
@@ -1691,6 +1711,7 @@ inline static int _remove(QF *qf, uint64_t hash, uint64_t *ret_hash, int *ret_ha
  * Code that uses the above to implement key-value-counter operations. *
  ***********************************************************************/
 
+// [TODO-P4] Extract to qf_metadata.c — init/use/destroy/malloc/free/copy/reset
 uint64_t qf_init(QF *qf, uint64_t nslots, uint64_t key_bits, uint64_t value_bits,
 								 enum qf_hashmode hash, uint32_t seed, void* buffer, uint64_t
 								 buffer_len)
@@ -1934,6 +1955,7 @@ void qf_reset(QF *qf)
 	return ret_numkeys;
 }*/
 
+// [TODO-P4] Extract to qf_resize.c — resize functions
 uint64_t qf_resize(QF* qf, uint64_t nslots, void* buffer, uint64_t buffer_len)
 {
 	QF new_qf;
@@ -2087,6 +2109,7 @@ int qf_remove(QF *qf, uint64_t key, uint64_t *ret_hash, int *ret_hash_len, uint8
 	return ret;
 }
 
+// [TODO-P4] Extract to qf_query.c — query functions
 // TODO: add a return value for the "value" bits attached to the fingerprint
 uint64_t qf_query(const QF *qf, uint64_t key, uint64_t *ret_index, uint64_t *ret_hash, int *ret_hash_len, uint8_t flags)
 {
@@ -2212,6 +2235,7 @@ static inline int adapt(QF *qf, uint64_t index, uint64_t hash_bucket_index, uint
 	return ext_bits + qf->metadata->quotient_bits + qf->metadata->bits_per_slot;
 }
 
+// [TODO-P4] Extract to qf_adapt.c — adapt functions
 /*	index is the index of the fingerprint to adapt (should have been returned in ret_index by qf_query or qf_insert_ret)
 	hash is the full hash of the item to extend the fingerprint of
 	other_hash is the full hash of the false positive item; qf_adapt will extend the fingerprint until it differentiates from other_hash
@@ -2282,6 +2306,7 @@ int qf_adapt_using_ll_table(QF *qf, uint64_t orig_key, uint64_t fp_key, uint64_t
 }
 
 
+// [TODO-P4] Extract to qf_metadata.c — metadata accessors
 enum qf_hashmode qf_get_hashmode(const QF *qf) {
 	return qf->metadata->hash_mode;
 }
@@ -2336,6 +2361,7 @@ void qf_sync_counters(const QF *qf) {
 	pc_sync(&qf->runtimedata->pc_noccupied_slots);
 }
 
+// [TODO-P4] Extract to qf_iter.c — iterator functions
 /* initialize the iterator at the run corresponding
  * to the position index
  */
@@ -2554,6 +2580,7 @@ bool qfi_end(const QFi *qfi)
 	return false;
 }
 
+// [TODO-P4] Extract to qf_merge.c — merge, bulk insert, multi-merge
 static inline int _finger_cmp(uint64_t bits_per_item, uint64_t rema, uint64_t exta, int extlena, uint64_t remb, uint64_t extb, int extlenb) {
 	if (rema < remb) return -1;
 	else if (remb < rema) return 1;
@@ -2998,6 +3025,7 @@ uint64_t qf_count_key_value(const QF *qf, uint64_t key, uint64_t value,
         return 0;
 }
 
+// [TODO-P4] Extract to qf_misc.c — inner product, intersect, magnitude
 /* find cosine similarity between two QFs. 
  * DO NOT USE
  * */

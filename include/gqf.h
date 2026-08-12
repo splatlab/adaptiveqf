@@ -1,6 +1,13 @@
 #ifndef _GQF_H_
 #define _GQF_H_
 
+// [TODO-P2] Consider adding a `qf_adapt_ext` function that exposes the full
+//   fingerprint extension API for use by the C++ filters layer.
+// [TODO-P4] Split this header into focused sub-headers:
+//   qf_types.h, qf_insert.h, qf_query.h, qf_adapt.h, qf_iter.h, qf_metadata.h
+// [TODO-P4] The lock/unlock functions (qf_lock, qf_unlock) are low-level
+//   internals and should be moved to a private header.
+
 #include <inttypes.h>
 #include <stdbool.h>
 
