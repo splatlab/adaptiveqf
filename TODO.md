@@ -12,12 +12,24 @@ tagged `[VENDORED]`.
 ### File Inventory
 
 #### Core Implementation
-- [ ] [TODO-P1] `src/gqf.c` (3081 lines) — Core QF implementation.
-  Contains: insert, query, adapt, iterate, metadata, debug, locking,
-  recording. ALL tangled in one file. See Phase 4 for modularization.
+- [ ] [TODO-P1] `src/gqf.c` (3081 lines) — Legacy CQF implementation.
+  Being replaced by `src/aqf.c`. See Phase 4 for the migration plan.
+- [ ] [TODO-P1] `src/aqf.c` (~1000 lines) — AQF implementation.
+  Self-contained: insert, query, adapt, metadata, debug, locking.
+  One file, same structure as gqf.c but simplified (no counters, no
+  extensions, no merge/iterate/resize yet).
+- [ ] [TODO-P1] `include/aqf.h` — Public C API for the AQF.
+  Currently a subset of gqf.h. Needs to grow to cover all features
+  that callers depend on.
+- [ ] [TODO-P1] `include/aqf_int.h` — Internal struct definitions shared
+  between aqf.c and the C++ wrapper.
 - [ ] [TODO-P1] [DEAD] `src/gqf_backup.c` (3352 lines) — Near-duplicate
   of gqf.c. Run `diff src/gqf.c src/gqf_backup.c` and document the
   actual differences. Leave in place until Phase 4.
+- [ ] [TODO-P1] `src/gqf_ski_rental.cpp` (3581 lines) — C++ version of
+  gqf.c with SkiRental adaptation. Reference for correct adapt logic.
+  Not compiled into libqf.a.
+
 #### `taf.cc` (Telescoping? Unknown Acronym)
 
 - [ ] [TODO-P1] `src/taf.cc` (3029 lines) — C++ file using STXXL (disk-backed
@@ -47,37 +59,31 @@ Tests will be re-added from scratch once the refactored structure is stable.
 
 ---
 
-## PHASE 2 — Add C++ Filter Layer
+## PHASE 2 — C++ Filter Layer
 
-### Create `filters/`
-- [ ] [TODO-P2] `filters/qf_filter.hpp` — Config/result structs.
-      Model after `SkiRentalAdaptiveQF/variants/qf_filter.hpp`:
-      `QFilterConfig`, `QFilterQueryResult`, `BenchmarkParams`.
-- [ ] [TODO-P2] `filters/adaptiveqf.hpp` — Wraps C AQF API:
-      `qf_insert_using_ll_table`, `qf_query_using_ll_table`,
-      `qf_adapt_using_ll_table`. Should be ~35 lines.
-      Model after `SkiRentalAdaptiveQF/variants/adaptiveqf.hpp`.
-- [ ] [TODO-P2] Add a static factory method `AdaptiveQF::loadFromFile("dump.qf", cfg)`
-      that calls `qf_use()` instead of `qf_malloc()` to recreate a filter from
-      a saved file.
+### `aqf_wrapper.hpp` (exists, needs work)
+- [X] [TODO-P2] `include/aqf_wrapper.hpp` — C++ template wrapping AQF C API.
+  Currently wraps `aqf_insert`, `aqf_query`, `aqf_adapt`.
+- [ ] [TODO-P2] Add `AdaptiveQF::loadFromFile("dump.qf", cfg)` that calls
+      `aqf_use()` to recreate a filter from a saved file.
 - [ ] [TODO-P2] `base_fingerprint_bits` is derived from `qbits + rbits` and passed
       to `reverseMap.init()`. It's an internal detail the fingerprint uses to
       encode rank. Find a way to handle this inside the reverse map so the
       filter doesn't need to pass it explicitly.
 - [ ] [TODO-P2] `fullPoint` (max_load_factor * nslots) is computed in the filter
-      wrapper but logically belongs inside gqf.c. The filter internals should
+      wrapper but logically belongs inside aqf.c. The filter internals should
       track load factor thresholds rather than the wrapper checking
       noccupied_slots externally.
 
-### Create `examples/`
+### Examples
+- [X] [TODO-P2] `examples/adapt_demo.cpp` — insert, trigger false positive,
+      adapt, verify correction.
+- [X] [TODO-P2] `examples/Makefile` — builds examples against libqf.a.
 - [ ] [TODO-P2] `examples/basic_insert_query.c` — insert keys, query, check
       false positives.
-- [ ] [TODO-P2] `examples/adapt_demo.c` — insert, trigger a false positive,
-      adapt, verify correction.
 - [ ] [TODO-P2] `examples/bulk_load.c` — bulk insert + measure throughput.
-- [ ] [TODO-P2] `examples/Makefile` — builds examples against the AQF library.
 
-### Create benchmark driver
+### Benchmark driver
 - [ ] [TODO-P2] `bench/cpp/bench_filters.cc` — Single executable,
       parameterized by CLI args:
       `--load-factor`, `--num-inserts`, `--num-queries`,
@@ -89,81 +95,95 @@ Tests will be re-added from scratch once the refactored structure is stable.
 
 ### Build system (initial)
 - [ ] [TODO-P2] Add compile targets: `bench_filters`, `workload_gen`.
-- [ ] [TODO-P2] Add `filters/` and `reverse_maps/*/` to include paths.
 - [ ] [TODO-P2] Use `sponge/build/` for output artifacts.
 
 ---
 
 ## PHASE 3 — Delete Old Tests
 
-- [ ] [TODO-P3] Delete all `src/test_*.c`, `src/test_*.cc` files.
-- [ ] [TODO-P3] Delete all `test/test_*.c` files.
-- [ ] [TODO-P3] Delete `src/test_driver.c` and `include/test_driver.h`.
-- [ ] [TODO-P3] Remove all test targets from the Makefile.
+- [X] [TODO-P3] Delete all `src/test_*.c`, `src/test_*.cc` files.
+- [X] [TODO-P3] Delete all `test/test_*.c` files.
+- [X] [TODO-P3] Delete `src/test_driver.c` and `include/test_driver.h`.
+- [X] [TODO-P3] Remove all test targets from the Makefile.
 - [ ] [TODO-P3] Update `CHANGELOG.md` if any new bugs are discovered during
       deletion (records what each deleted test covered).
 
 ---
 
-## PHASE 4 — Decompose the C Core
+## PHASE 4 — Complete the AQF and Remove gqf.c
 
-### Modularization of `src/gqf.c`
+### Goal: `aqf.c` replaces `gqf.c` entirely. No caller depends on gqf.c.
 
-Section boundaries in `gqf.c` (by line number):
+### AQF API gaps (features in gqf.h that aqf.h doesn't expose)
 
-| Lines | Module | Proposed file |
-|---|---|---|
-| 1–53 | Headers, macros, constants | (shared header) |
-| 54–260 | Locking | `qf_lock.c` |
-| 263–540 | Bit utilities (popcnt, select, rank) | `qf_bitutil.c` |
-| 540–827 | Slot operations (get/set, run_end, shift) | `qf_slot.c` |
-| 764–968 | Debug/dump | `qf_debug.c` |
-| 968–987 | `insert_one_slot`, `get_slot_info` (first def) | `qf_slot.c` |
-| 1021–1140 | Recording | `qf_record.c` |
-| 1141–1418 | `insert`, `insert_using_ll_table` (internal) | `qf_insert.c` |
-| 1419–1553 | Public query/insert-with-ll-table | `qf_query.c`, `qf_insert.c` |
-| 1554–1693 | `insert_and_extend` | `qf_insert.c` |
-| 1694–1936 | Init/use/destroy/malloc/free/copy/reset | `qf_metadata.c` |
-| 1937–2090 | Resize, auto-resize, set_count, remove | `qf_resize.c`, `qf_insert.c` |
-| 2091–2283 | Query, adapt (public) | `qf_query.c`, `qf_adapt.c` |
-| 2285–2340 | Metadata accessors | `qf_metadata.c` |
-| 2342–2556 | Iterators | `qf_iter.c` |
-| 2557–2966 | Merge, bulk insert, multi-merge | `qf_merge.c` |
-| 2967–3081 | Inner product, intersect, magnitude | `qf_misc.c` |
+#### Lifecycle
+- [ ] [TODO-P4] Port `aqf_init` (buffer-based init, like `qf_init`)
+- [ ] [TODO-P4] Port `aqf_destroy` (return buffer, like `qf_destroy`)
+- [ ] [TODO-P4] Port `aqf_use` (deserialize from buffer, like `qf_use`)
+- [ ] [TODO-P4] Port `aqf_resize` / `aqf_resize_malloc`
+- [ ] [TODO-P4] Port `aqf_set_auto_resize`
 
-- [ ] [TODO-P4] Extract `qf_lock.c` (lines 54–260)
-- [ ] [TODO-P4] Extract `qf_bitutil.c` (lines 263–540)
-- [ ] [TODO-P4] Extract `qf_slot.c` (lines 540–827, plus 968–987)
-- [ ] [TODO-P4] Extract `qf_debug.c` (lines 764–968)
-- [ ] [TODO-P4] Extract `qf_record.c` (lines 1021–1140)
-- [ ] [TODO-P4] Extract `qf_insert.c` (lines 1141–1418 plus 1554–2090)
-- [ ] [TODO-P4] Extract `qf_query.c` (lines 1419–1553, 2091–2139)
-- [ ] [TODO-P4] Extract `qf_adapt.c` (lines 2140–2283)
-- [ ] [TODO-P4] Extract `qf_metadata.c` (lines 1694–1936, 2285–2340)
-- [ ] [TODO-P4] Extract `qf_resize.c` (lines 1937–2090)
-- [ ] [TODO-P4] Extract `qf_iter.c` (lines 2342–2556)
-- [ ] [TODO-P4] Extract `qf_merge.c` (lines 2557–2966)
-- [ ] [TODO-P4] Extract `qf_misc.c` (lines 2967–3081)
-- [ ] [TODO-P4] Create `qf_internal.h` — shared internal macros/decls
-      that the extracted modules all need (METADATA_WORD, BITMASK, etc.)
+#### Core operations
+- [ ] [TODO-P4] Port `aqf_remove` (remove a fingerprint) — needed for
+      SplinterDB reverse-map adapt path
+- [ ] [TODO-P4] Port `aqf_delete_key_value` (remove all instances)
+- [ ] [TODO-P4] Port `aqf_set_count` (set counter)
 
-### Remove SEVEN_BIT_OFFSET compile-time flag
-- [ ] [TODO-P4] Remove all `#ifndef SEVEN_BIT_OFFSET` / `#else` / `#endif`
-      blocks from `gqf.c` (5+ locations: `block_offset`, `shift_runends`,
-      `insert_one_slot`, `adapt`, `remove_replace_...`, `increment_block_counter`).
-      Keep the full `uint8_t` offset path and delete the 7-bit variant.
-- [ ] [TODO-P4] Remove `increment_block_counter()` — it exists only for the
-      `SEVEN_BIT_OFFSET` path (sets bit 7 of the offset).
-- [ ] [TODO-P4] Validate that no variant or test depends on the 7-bit behavior.
-      See `CHANGELOG.md` for the full discussion.
+#### Metadata accessors
+- [ ] [TODO-P4] Add `aqf_get_bits_per_slot`
+- [ ] [TODO-P4] Add `aqf_get_quotient_bits`
+- [ ] [TODO-P4] Add `aqf_get_key_remainder_bits`
+- [ ] [TODO-P4] Add `aqf_get_hash_mode`
+- [ ] [TODO-P4] Add `aqf_get_seed`
+- [ ] [TODO-P4] Add `aqf_get_num_distinct`
+- [ ] [TODO-P4] Add `aqf_get_nblocks`
+- [ ] [TODO-P4] Add `aqf_get_num_key_bits`
+- [ ] [TODO-P4] Add `aqf_get_num_value_bits`
+
+#### Iterators
+- [ ] [TODO-P4] Port iterator API (`aqf_iterator_from_position`,
+      `aqf_iterator_from_key_value`, `aqfi_get_key`, `aqfi_get_hash`,
+      `aqfi_next`, `aqfi_end`)
+
+#### Misc
+- [ ] [TODO-P4] Port `aqf_reset` (clear filter)
+- [ ] [TODO-P4] Port `aqf_copy`
+- [ ] [TODO-P4] Port `aqf_merge` / `aqf_multi_merge`
+- [ ] [TODO-P4] Port `aqf_inner_product` / `aqf_magnitude`
+- [ ] [TODO-P4] Port `aqf_hash_cmp`
+
+### Remove gqf.c dependency from callers
+
+- [ ] [TODO-P4] `reverse_maps/splinterdb/splinter_util.c` — currently calls
+      `qf_insert_using_ll_table`. Switch to `aqf_insert`.
+- [ ] [TODO-P4] `examples/adapt_demo.cpp` — legacy path uses `extern` declaration
+      for `qf_insert_using_ll_table`. Remove once gqf.c is gone.
+- [ ] [TODO-P4] Remove `insert_aqf_copy` experiment from `gqf.c` (added during
+      debugging, no longer needed).
+- [ ] [TODO-P4] Remove `extern` declarations from `aqf.c` that reference gqf.c
+      functions (`insert_and_extend`, `qf_get_count_using_ll_table`,
+      `qf_adapt_using_ll_table`).
+
+### Cleanup
+
+- [ ] [TODO-P4] Delete `src/gqf.c`
+- [ ] [TODO-P4] Delete `include/gqf.h`
+- [ ] [TODO-P4] Delete `include/gqf_int.h`
+- [ ] [TODO-P4] Remove `gqf.o` from the Makefile build targets
+- [ ] [TODO-P4] Remove `gqf_ski_rental.cpp` from the repo (or keep as reference)
+- [ ] [TODO-P4] Remove SEVEN_BIT_OFFSET blocks from `gqf_ski_rental.cpp`
+      (only remaining file with them)
+- [ ] [TODO-P4] Remove `insert_and_extend` from aqf.c's insert (AQF always
+      uses count=1, the `count > 1` path is dead code)
+- [ ] [TODO-P4] Encapsulate `qfblock` — replace direct struct access
+      with accessor functions throughout aqf.c
+- [ ] [TODO-P4] Remove `#include "ll_table.h"` from aqf_int.h (no longer needed
+      once the SplinterDB reverse map is migrated)
 
 ### Resolve `src/gqf_backup.c`
 - [ ] [TODO-P4] [DEAD] Run: `diff src/gqf.c src/gqf_backup.c`
-- [ ] [TODO-P4] Determine which file is canonical. Options:
-    - gqf_backup.c is strictly a subset → delete.
-    - gqf_backup.c has diverging logic → merge differences or keep both.
-- [ ] [TODO-P4] Document the result in a comment at the top of whichever
-      file survives.
+- [ ] [TODO-P4] Determine if any logic in gqf_backup.c is missing from aqf.c
+- [ ] [TODO-P4] Delete `src/gqf_backup.c`
 
 ### Clean vendored code
 - [ ] [TODO-P4] [VENDORED] Audit sglib.h usage. Which macros are called?
@@ -171,25 +191,6 @@ Section boundaries in `gqf.c` (by line number):
       Replace with `std::list`, `std::unordered_map`, etc.
 - [ ] [TODO-P4] [DEAD] Remove `other_filters/` directory or move to
       `vendor/` with attribution.
-
-### API cleanup
-- [ ] [TODO-P4] Remove duplicate function declarations from `gqf.h`
-      (e.g., `qf_lock`/`qf_unlock` should probably not be public API).
-- [ ] [TODO-P4] Add `extern "C"` guards to all headers (already done
-      for gqf.h and gqf_int.h, but check others).
-- [ ] [TODO-P4] Encapsulate `qfblock` — replace direct struct access
-      with accessor functions throughout the codebase.
-- [ ] [TODO-P4] Simplify the AQF interface: `bulkInsert(keys, numKeys)` should
-      pass raw keys to the QF via `qf_insert_using_ll_table(key, ...)` without
-      `QF_KEY_IS_HASH`. The QF handles hashing internally and returns the
-      fingerprint, rank, and minirun info in the result struct. This removes
-      the fingerprint pre-computation from `bulkInsert` and the `hash_mode`
-      branching in `filters/adaptiveqf.hpp`.
-
-### Shared core strategy
-- [ ] [TODO-P4] Decide how `SkiRentalAdaptiveQF/` and
-      `DeamortizedRehashing/` will share the C core once it's modularized:
-      symlinks, shared `libqf/` directory, or sync script.
 
 ---
 
@@ -229,7 +230,7 @@ Section boundaries in `gqf.c` (by line number):
 | Phase | Items | Status |
 |---|---|---|
 | P1 — Document | File inventory, dependency map | ░░░░░ |
-| P2 — C++ Layer | filters/, bench_filters.cc, examples/ | ░░░░░ |
-| P3 — Delete Tests | Remove all legacy test files | ░░░░░ |
-| P4 — Decompose C | gqf.c → modules, gqf_backup, vendored cleanup | ░░░░░ |
+| P2 — C++ Layer | aqf_wrapper.hpp, examples/bench | ▒▒▒▒░ |
+| P3 — Delete Tests | Legacy test files removed | ▒▒▒▒▒ |
+| P4 — Complete AQF | Port remaining gqf.c features, remove gqf.c | ▒▒▒░░ |
 | P5 — Build | Makefile cleanup, dependency tracking | ░░░░░ |

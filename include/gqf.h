@@ -78,6 +78,7 @@ extern "C" {
 		uint64_t hash;
 		uint64_t minirun_id;
 		int minirun_existed;
+		int minirun_rank;
 	} typedef qf_insert_result;
 
 	/******************************************

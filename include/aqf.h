@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 #include "aqf_int.h"
+#include "hashutil.h"
 
 // [TODO] File-backed QF operations (serialize/deserialize, init from file)
 // were removed. These need to be re-added to the AQF API.
@@ -34,6 +35,10 @@ uint64_t aqf_get_total_size_in_bytes(const QF *qf);
 
 // Bulk insert — handles hashing internally based on hash_mode
 int aqf_bulk_insert(QF *qf, uint64_t *keys, uint64_t numKeys, uint8_t flags);
+
+// Debug
+void aqf_dump_metadata(const QF *qf);
+void aqf_dump(const QF *qf);
 
 #ifdef __cplusplus
 }

@@ -31,11 +31,17 @@ enum qf_hashmode {
 /* Insert result (from gqf.h) */
 struct qf_insert_result_t {
   uint64_t hash;
-  uint64_t minirun_id;
+  uint64_t minirun_id;   // base fingerprint (quotient + remainder), not position in block
   int minirun_existed;
+  int minirun_rank;      // position within the minirun of matching remainders
 } typedef qf_insert_result;
 
 /* Block layout (from gqf_int.h) */
+#define MAGIC_NUMBER 1018874902021329732
+#define NUM_SLOTS_TO_LOCK (1ULL<<16)
+#define MAX_VALUE(nbits) ((1ULL << (nbits)) - 1)
+#define BITMASK(nbits)                                    \
+  ((nbits) == 64 ? 0xffffffffffffffff : MAX_VALUE(nbits))
 #define QF_BITS_PER_SLOT 0
 #define QF_BLOCK_OFFSET_BITS (6)
 #define QF_SLOTS_PER_BLOCK (1ULL << QF_BLOCK_OFFSET_BITS)
@@ -142,9 +148,16 @@ static inline qfblock * get_block(const QF *qf, uint64_t block_index)
 extern "C" {
 #endif
 
-bool qf_malloc(QF *qf, uint64_t nslots, uint64_t key_bits,
-               uint64_t value_bits, enum qf_hashmode hash, uint32_t seed);
-void qf_free(QF *qf);
+typedef struct {
+  uint64_t slot;
+  int is_runend;
+  int is_extension;
+  uint64_t quotient;
+} qf_slot_debug;
+
+int aqf_read_quotient_slots(const QF *qf, uint64_t start_quotient,
+                             int num_quotients, qf_slot_debug *slots,
+                             uint64_t max_slots, uint64_t *num_slots);
 int qf_insert_using_ll_table(QF *qf, uint64_t key, uint64_t count,
                              qf_insert_result *result, uint8_t flags);
 int qf_get_count_using_ll_table(const QF *qf, uint64_t key,
