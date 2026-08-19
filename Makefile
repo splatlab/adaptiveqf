@@ -55,17 +55,23 @@ CORE_OBJS = \
 	$(OBJDIR)/aqf.o
 
 # Reverse map source files
-RM_OBJS = \
-	$(OBJDIR)/ll_table.o
+LLTABLE_OBJS = $(OBJDIR)/ll_table.o
+
+SPLINTER_OBJS = $(OBJDIR)/splinter_util.o
+
+all: libaqf.a liblltable.a
+
+libaqf.a: $(CORE_OBJS)
+	ar rcs $@ $^
+
+liblltable.a: $(LLTABLE_OBJS)
+	ar rcs $@ $^
 
 ifneq ($(wildcard $(SPLINTERPATH)/libsplinterdb.a),)
-RM_OBJS += $(OBJDIR)/splinter_util.o
-endif
-
-all: libqf.a
-
-libqf.a: $(CORE_OBJS) $(RM_OBJS)
+all: libsplinterutil.a
+libsplinterutil.a: $(SPLINTER_OBJS)
 	ar rcs $@ $^
+endif
 
 # Core source compilation
 $(OBJDIR)/gqf.o: src/gqf.c include/gqf.h include/gqf_int.h reverse_maps/ll_table/ll_table.h | $(OBJDIR)
@@ -94,4 +100,4 @@ $(OBJDIR):
 
 .PHONY: clean
 clean:
-	rm -rf $(OBJDIR) libqf.a
+	rm -rf $(OBJDIR) libaqf.a liblltable.a libsplinterutil.a
