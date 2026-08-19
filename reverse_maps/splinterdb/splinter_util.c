@@ -18,7 +18,7 @@ int merge_tuples_final(const data_config *cfg, slice key, merge_accumulator *old
 
 data_config qf_data_config_init() {
 	data_config data_cfg;
-	default_data_config_init(MAX_KEY_SIZE, &data_cfg);
+	default_data_config_init(&data_cfg);
 
 	data_cfg.merge_tuples = merge_tuples;
 	data_cfg.merge_tuples_final = merge_tuples_final;
@@ -59,8 +59,8 @@ int db_insert(splinterdb *database, const void *key_data, const size_t key_len, 
 	slice key_slice = slice_create(MAX_KEY_SIZE, key_padded);
 	slice val_slice = slice_create(MAX_VAL_SIZE, val_padded);
 
-	if (update) return splinterdb_update(database, key_slice, val_slice);
-	else return splinterdb_insert(database, key_slice, val_slice);
+	if (update) return splinterdb_update(database, key_slice, val_slice, NULL);
+	return splinterdb_insert(database, key_slice, val_slice, NULL);
 }
 
 // Returns 0 if there's an error, 1 if inserted into empty minirun, 2 if inserted into existing minirun
@@ -77,7 +77,7 @@ int qf_splinter_insert(QF *qf, splinterdb *db, uint64_t key, int count) {
 			char buffer[2 * MAX_KEY_SIZE];
 			slice query = padded_slice(&result.minirun_id, MAX_KEY_SIZE, sizeof(result.minirun_id), buffer, 0);
 			splinterdb_lookup_result db_result;
-			splinterdb_lookup_result_init(db, &db_result, 0, NULL);
+			splinterdb_lookup_result_init(db, &db_result, SPLINTERDB_LOOKUP_VALUE, 0, NULL);
 			splinterdb_lookup(db, query, &db_result);
 			slice result_val;
 			splinterdb_lookup_result_value(&db_result, &result_val);
@@ -120,7 +120,7 @@ int qf_splinter_insert_split(QF *qf, splinterdb *db, splinterdb *bm, uint64_t ke
 			char buffer[2 * MAX_KEY_SIZE];
 			slice query = padded_slice(&result.minirun_id, MAX_KEY_SIZE, sizeof(result.minirun_id), buffer, 0);
 			splinterdb_lookup_result bm_result;
-			splinterdb_lookup_result_init(bm, &bm_result, 0, NULL);
+			splinterdb_lookup_result_init(bm, &bm_result, SPLINTERDB_LOOKUP_VALUE, 0, NULL);
 			splinterdb_lookup(bm, query, &bm_result);
 			slice result_val;
 			splinterdb_lookup_result_value(&bm_result, &result_val);

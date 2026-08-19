@@ -1205,3 +1205,5 @@ int aqf_read_quotient_slots(const QF *qf, uint64_t start_quotient,
 	*num_slots = total;
 	return 0;
 }
+
+#endif

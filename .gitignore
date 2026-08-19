@@ -21,3 +21,5 @@ stxxl.*
 obj/
 external/
 data/
+
+libqf.a
