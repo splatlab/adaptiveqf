@@ -1,0 +1,32 @@
+site_name: Adaptive Quotient Filter
+site_description: Approximate membership query filter with false-positive adaptation
+repo_url: https://github.com/splatlab/adaptiveqf
+edit_uri: edit/cleanup/docs/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - admonition
+
+nav:
+  - Home: index.md
+  - Overview: overview.md
+  - Getting Started: getting-started.md
+  - Building: building.md
+  - Reverse Maps: reverse-maps.md
+  - Quotient Filter: qf.md
+  - API Reference: api.md
